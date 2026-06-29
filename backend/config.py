@@ -8,6 +8,7 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 UPLOAD_DIR = os.path.join(BASE_DIR, "uploads")
 OUTPUT_DIR = os.path.join(BASE_DIR, "outputs")
 COMFYUI_DIR = os.path.join(os.path.dirname(BASE_DIR), "ComfyUI")
+LORA_DIR = os.path.join(COMFYUI_DIR, "models", "loras")
 
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 os.makedirs(OUTPUT_DIR, exist_ok=True)
@@ -23,6 +24,7 @@ DEFAULT_WIDTH = 1024
 DEFAULT_HEIGHT = 1024
 DEFAULT_STEPS = 25
 DEFAULT_CFG = 7.0
+DEFAULT_LORA_STRENGTH = 1.0
 
 # ── Prompts ──────────────────────────────────────────────────────────
 SAFETY_NEGATIVE = (

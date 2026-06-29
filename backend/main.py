@@ -9,7 +9,7 @@ from pathlib import Path
 from datetime import datetime
 import json, os, shutil
 
-from config import HOST, PORT, UPLOAD_DIR, OUTPUT_DIR, COMFYUI_DIR, DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG
+from config import HOST, PORT, UPLOAD_DIR, OUTPUT_DIR, COMFYUI_DIR, LORA_DIR, DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG, DEFAULT_LORA_STRENGTH
 from comfy_client import comfy
 from workflows import build
 
@@ -45,6 +45,19 @@ async def upload(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, f)
     return {"filename": name, "size": path.stat().st_size}
 
+# ── LoRAs ───────────────────────────────────────────────────────────
+@app.get("/api/loras")
+def list_loras():
+    """List available LoRA files from ComfyUI's loras directory."""
+    path = Path(LORA_DIR)
+    if not path.exists():
+        return []
+    files = []
+    for f in path.iterdir():
+        if f.suffix.lower() in (".safetensors", ".ckpt", ".pt"):
+            files.append(f.name)
+    return sorted(files)
+
 # ── Generate ───────────────────────────────────────────────────────
 @app.post("/api/generate")
 async def generate(
@@ -57,6 +70,8 @@ async def generate(
     seed: int = Form(-1),
     model: str = Form(DEFAULT_MODEL),
     anatomy: bool = Form(False),
+    lora: str = Form(None),
+    lora_strength: float = Form(DEFAULT_LORA_STRENGTH),
     reference_image: str = Form(None),
     pose_image: str = Form(None),
     mask_image: str = Form(None),
@@ -65,7 +80,7 @@ async def generate(
     if not comfy.is_ready():
         raise HTTPException(503, "ComfyUI is not running. Start it first.")
 
-    params = {"prompt": prompt, "width": width, "height": height, "steps": steps, "cfg": cfg, "seed": seed, "model": model, "anatomy": anatomy}
+    params = {"prompt": prompt, "width": width, "height": height, "steps": steps, "cfg": cfg, "seed": seed, "model": model, "anatomy": anatomy, "lora": lora, "lora_strength": lora_strength}
 
     if task == "face":
         if not reference_image: raise HTTPException(400, "Need reference_image")
