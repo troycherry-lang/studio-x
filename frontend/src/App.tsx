@@ -33,6 +33,9 @@ export default function App() {
   const [anatomy, setAnatomy] = useState(false);
   const [model, setModel] = useState('juggernautXL_v8Rundiffusion.safetensors');
   const [models, setModels] = useState([]);
+  const [loras, setLoras] = useState([]);
+  const [lora, setLora] = useState('None');
+  const [loraStrength, setLoraStrength] = useState(1.0);
   const [refImage, setRefImage] = useState('');
   const [poseImage, setPoseImage] = useState('');
   const [maskImage, setMaskImage] = useState('');
@@ -50,6 +53,7 @@ export default function App() {
   useEffect(() => {
     fetch(`${API}/api/health`).then(r => r.json()).then(d => setBackendReady(d.comfyui)).catch(() => setBackendReady(false));
     fetch(`${API}/api/models`).then(r => r.json()).then(d => { if (d.length) setModels(d); }).catch(() => {});
+    fetch(`${API}/api/loras`).then(r => r.json()).then(d => setLoras(d || [])).catch(() => setLoras([]));
   }, []);
 
   const needsRef = task !== 'create';
@@ -85,6 +89,10 @@ export default function App() {
     f.append('seed', String(seed));
     f.append('model', model);
     f.append('anatomy', String(anatomy));
+    if (lora && lora !== 'None') {
+      f.append('lora', lora);
+      f.append('lora_strength', String(loraStrength));
+    }
     if (refImage) f.append('reference_image', refImage);
     if (poseImage) f.append('pose_image', poseImage);
     if (maskImage) f.append('mask_image', maskImage);
@@ -178,6 +186,24 @@ export default function App() {
               {models.map(m => <option key={m} value={m}>{m.replace('.safetensors', '')}</option>)}
             </select>
           </div>
+
+          {loras.length > 0 && (
+            <>
+              <div className="field">
+                <label>LoRA</label>
+                <select value={lora} onChange={e => setLora(e.target.value)}>
+                  <option value="None">None</option>
+                  {loras.map(l => <option key={l} value={l}>{l.replace('.safetensors', '')}</option>)}
+                </select>
+              </div>
+              {lora !== 'None' && (
+                <div className="field row">
+                  <label>LoRA Strength: {loraStrength.toFixed(1)}</label>
+                  <input type="range" min={0.1} max={2.0} step={0.1} value={loraStrength} onChange={e => setLoraStrength(Number(e.target.value))} />
+                </div>
+              )}
+            </>
+          )}
 
           <div className="field">
             <label>Aspect Ratio</label>
