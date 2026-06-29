@@ -44,9 +44,11 @@ yarn-debug.log*
 yarn-error.log*
 
 # Build outputs
-frontend/dist/
+frontend/dist/**/*
+!frontend/dist/
 !frontend/dist/index.html
 !frontend/dist/assets/
+!frontend/dist/assets/**/*
 
 # OS
 .DS_Store
