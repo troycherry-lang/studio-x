@@ -45,6 +45,19 @@ async def upload(file: UploadFile = File(...)):
         shutil.copyfileobj(file.file, f)
     return {"filename": name, "size": path.stat().st_size}
 
+# ── Models ──────────────────────────────────────────────────────────
+@app.get("/api/models")
+def list_models():
+    """List available checkpoint models from ComfyUI's checkpoints directory."""
+    ckpt_dir = Path(COMFYUI_DIR) / "models" / "checkpoints"
+    if not ckpt_dir.exists():
+        return []
+    files = []
+    for f in ckpt_dir.iterdir():
+        if f.suffix.lower() in (".safetensors", ".ckpt", ".pt"):
+            files.append(f.name)
+    return sorted(files)
+
 # ── LoRAs ───────────────────────────────────────────────────────────
 @app.get("/api/loras")
 def list_loras():
