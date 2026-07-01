@@ -57,8 +57,8 @@ export default function App() {
   const [backendReady, setBackendReady] = useState(false);
   const pollRef = useRef(null);
 
-  const BODY_KEYWORDS = ['full body', 'head to toe', 'feet', 'legs', 'nude', 'naked', 'topless', 'breasts', 'nipples', 'vagina', 'pussy', 'genitals', 'shaved', 'trimmed', 'pubic hair', 'dildo', 'masturbating'];
-  const hasBodyKeywords = BODY_KEYWORDS.some(kw => prompt.toLowerCase().includes(kw));
+  const PORTRAIT_KEYWORDS = ['close up', 'close-up', 'portrait', 'headshot', 'face only', 'upper body', 'bust', 'torso', 'waist up', 'chest up', 'shoulders up', 'head and shoulders', 'profile', 'selfie'];
+  const isPortrait = PORTRAIT_KEYWORDS.some(kw => prompt.toLowerCase().includes(kw));
 
   useEffect(() => {
     fetch(`${API}/api/health`).then(r => r.json()).then(d => setBackendReady(d.comfyui)).catch(() => setBackendReady(false));
@@ -210,7 +210,7 @@ export default function App() {
           <div className="field">
             <label>Description</label>
             <textarea rows={3} value={prompt} onChange={e => setPrompt(e.target.value)} placeholder={task === 'create' ? 'Describe the image you want to create...' : 'Describe what you want to change...'} />
-            {hasBodyKeywords && <div className="tag body">Full body detected — anti-crop enabled</div>}
+            {isPortrait ? <div className="tag portrait">Portrait mode — close-up framing</div> : <div className="tag body">Full body default — entire figure</div>}
             {task === 'pose' && <div className="tag hint">Upload a person photo and a pose reference. The person keeps their face, body takes the new pose.</div>}
             {task === 'face' && <div className="tag hint">Upload a face photo. The person keeps their face, everything else changes to match your description.</div>}
             {task === 'wardrobe' && <div className="tag hint">Upload a photo and a mask (white = area to change). Describe the new clothing.</div>}

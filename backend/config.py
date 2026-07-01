@@ -58,6 +58,6 @@ BODY_KEYWORDS = [
     "shaved", "trimmed", "pubic hair", "dildo", "masturbating",
 ]
 
-# Always inject full body by default
-BODY_POSITIVE = "full body, head to toe, standing, complete anatomy, entire figure visible, natural proportions, feet visible, legs visible"
-BODY_NEGATIVE = "cropped, missing legs, missing feet, cut off, waist up, upper body only, close up, portrait framing, headshot"
+# Always inject full body by default — place at START of prompt for maximum CLIP weight
+BODY_POSITIVE = "full body shot, head to toe, entire figure in frame, standing, complete visible anatomy, legs visible, feet visible, whole body shown, not cropped"
+BODY_NEGATIVE = "cropped, missing legs, missing feet, cut off, waist up, upper body only, close up, portrait framing, headshot, bust shot, torso only"

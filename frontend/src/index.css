@@ -71,6 +71,7 @@ body { font-family: 'Inter', -apple-system, sans-serif; background: var(--bg); c
 
 .tag { font-size: 11px; padding: 4px 10px; border-radius: 4px; margin-top: 6px; display: inline-block; }
 .tag.body { background: #1e3a2f; color: var(--ok); border: 1px solid #2a5a45; }
+.tag.portrait { background: #3a2f1e; color: #f5c842; border: 1px solid #5a4a2a; }
 .tag.hint { background: var(--bg3); color: var(--text2); border: 1px solid var(--border); }
 
 label.check { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--text2); }

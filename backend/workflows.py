@@ -19,22 +19,23 @@ class Builder:
         return nid
 
     def _prompt(self, task, user_text, anatomy=False):
-        parts = ["professional photograph, high quality, detailed, realistic lighting"]
         user_lower = user_text.lower()
-        # Full body is DEFAULT unless user explicitly asks for portrait/close-up
         is_portrait = any(kw in user_lower for kw in PORTRAIT_KEYWORDS)
-        if not is_portrait:
-            parts.append(BODY_POSITIVE)
+        
+        # Build prompt with full body FIRST (highest CLIP weight)
+        if is_portrait:
+            parts = ["professional photograph, high quality, detailed, realistic lighting"]
+        else:
+            parts = [BODY_POSITIVE, "professional photograph, high quality, detailed, realistic lighting"]
         parts.append(user_text)
         if anatomy:
             parts.append("natural skin texture, visible pores, soft natural lighting, subsurface scattering")
         return ", ".join(parts)
 
     def _negative(self, user_text, anatomy=False, custom_negative=None):
-        parts = [DEFAULT_NEGATIVE]
         user_lower = user_text.lower()
-        # Anti-crop is always included by default now
         is_portrait = any(kw in user_lower for kw in PORTRAIT_KEYWORDS)
+        parts = [DEFAULT_NEGATIVE]
         if not is_portrait:
             parts.append(BODY_NEGATIVE)
         if anatomy:

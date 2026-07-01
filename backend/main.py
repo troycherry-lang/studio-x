@@ -174,6 +174,11 @@ def result(job_id: str):
     filename = job["outputs"][0]
     try:
         data = comfy.get_image(filename)
+        # Also save to StudioPro outputs folder for user access
+        out_path = Path(OUTPUT_DIR) / filename
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(out_path, "wb") as f:
+            f.write(data)
         return StreamingResponse(iter([data]), media_type="image/png")
     except Exception as e:
         raise HTTPException(500, f"Image error: {e}")
