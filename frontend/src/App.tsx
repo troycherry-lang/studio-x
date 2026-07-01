@@ -23,11 +23,11 @@ const RATIOS = [
 ];
 
 const BODY_FEATURES = [
-  { id: 'large_areolas', label: 'Large areolas', pos: 'large dark areolas, prominent nipples', neg: 'small areolas, pale nipples' },
+  { id: 'large_areolas', label: 'Large areolas', pos: 'large areolas, prominent nipples, natural nipple detail', neg: 'small areolas, tiny nipples' },
   { id: 'sagging', label: 'Natural sagging', pos: 'sagging natural breasts, breast ptosis, soft pendulous tissue, gravity-affected', neg: 'perky, lifted, firm, silicone, implants' },
   { id: 'uneven', label: 'Slightly uneven', pos: 'slightly asymmetrical breasts, one breast larger, natural unevenness', neg: 'symmetrical, perfectly matched, identical breasts' },
-  { id: 'mature', label: 'Mature / aged', pos: 'mature woman in her 50s, aged soft skin, natural aging, post-menopausal body', neg: 'young, teen, youthful, smooth flawless skin' },
-  { id: 'veins', label: 'Visible veins', pos: 'visible blue veins on breasts, translucent skin, vascular detail', neg: 'smooth skin, no veins, opaque skin' },
+  { id: 'mature', label: 'Mature / aged', pos: 'mature woman, aged soft skin, natural aging, lived-in body', neg: 'young, teen, youthful, smooth flawless skin' },
+  { id: 'veins', label: 'Visible veins', pos: 'visible veins on breasts, translucent skin, vascular detail', neg: 'smooth skin, no veins, opaque skin' },
   { id: 'stretch_marks', label: 'Stretch marks', pos: 'stretch marks on skin, natural skin texture, lived-in body', neg: 'flawless skin, perfect smooth skin, no blemishes' },
 ];
 
