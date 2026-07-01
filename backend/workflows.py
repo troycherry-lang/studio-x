@@ -28,13 +28,15 @@ class Builder:
             parts.append("natural skin texture, visible pores, soft natural lighting, subsurface scattering")
         return ", ".join(parts)
 
-    def _negative(self, user_text, anatomy=False):
+    def _negative(self, user_text, anatomy=False, custom_negative=None):
         parts = [DEFAULT_NEGATIVE]
         user_lower = user_text.lower()
         if any(kw in user_lower for kw in BODY_KEYWORDS):
             parts.append(BODY_NEGATIVE)
         if anatomy:
             parts.append("smooth skin, barbie, doll, mannequin, plastic, censored")
+        if custom_negative:
+            parts.append(custom_negative)
         return ", ".join(parts)
 
     def _checkpoint(self, model, lora=None, lora_strength=DEFAULT_LORA_STRENGTH):
@@ -52,14 +54,14 @@ class Builder:
         return ckpt, ckpt
 
     # ── Task: Create (text-to-image) ─────────────────────────────────
-    def create(self, prompt, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH):
+    def create(self, prompt, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, negative_prompt=None):
         self.nodes = {}
         self.id_counter = 0
         if seed == -1: seed = random.randint(0, 2**32 - 1)
 
         ckpt, mdl = self._checkpoint(model, lora, lora_strength)
         pos = self._node("CLIPTextEncode", {"text": self._prompt("create", prompt, anatomy), "clip": [mdl, 1]})
-        neg = self._node("CLIPTextEncode", {"text": self._negative(prompt, anatomy), "clip": [mdl, 1]})
+        neg = self._node("CLIPTextEncode", {"text": self._negative(prompt, anatomy, negative_prompt), "clip": [mdl, 1]})
         latent = self._node("EmptyLatentImage", {"width": width, "height": height, "batch_size": 1})
         sampler = self._node("KSampler", {
             "model": [mdl, 0], "positive": [pos, 0], "negative": [neg, 0], "latent_image": [latent, 0],
@@ -70,7 +72,7 @@ class Builder:
         return self.nodes
 
     # ── Task: Face (IP-Adapter portrait) ────────────────────────────
-    def face(self, prompt, ref_image, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH):
+    def face(self, prompt, ref_image, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, negative_prompt=None):
         self.nodes = {}
         self.id_counter = 0
         if seed == -1: seed = random.randint(0, 2**32 - 1)
@@ -81,7 +83,7 @@ class Builder:
         ipa = self._node("IPAdapter", {"model": [ip, 0], "ipadapter": [ip, 1], "image": [img, 0], "weight": 0.8, "start_at": 0.0, "end_at": 1.0, "weight_type": "standard"})
 
         pos = self._node("CLIPTextEncode", {"text": self._prompt("face", prompt, anatomy), "clip": [mdl, 1]})
-        neg = self._node("CLIPTextEncode", {"text": self._negative(prompt, anatomy), "clip": [mdl, 1]})
+        neg = self._node("CLIPTextEncode", {"text": self._negative(prompt, anatomy, negative_prompt), "clip": [mdl, 1]})
         latent = self._node("EmptyLatentImage", {"width": width, "height": height, "batch_size": 1})
         sampler = self._node("KSampler", {"model": [ipa, 0], "positive": [pos, 0], "negative": [neg, 0], "latent_image": [latent, 0], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler_ancestral", "scheduler": "normal", "denoise": 1.0})
         vae = self._node("VAEDecode", {"samples": [sampler, 0], "vae": [ckpt, 2]})
@@ -89,7 +91,7 @@ class Builder:
         return self.nodes
 
     # ── Task: Pose (OpenPose + IP-Adapter) ───────────────────────────
-    def pose(self, prompt, person_img, pose_img, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH):
+    def pose(self, prompt, person_img, pose_img, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, negative_prompt=None):
         self.nodes = {}
         self.id_counter = 0
         if seed == -1: seed = random.randint(0, 2**32 - 1)
@@ -106,7 +108,7 @@ class Builder:
         cna = self._node("ControlNetApply", {"conditioning": None, "control_net": [cn, 0], "image": [pre, 0], "strength": 1.0})
 
         pos = self._node("CLIPTextEncode", {"text": self._prompt("pose", prompt, anatomy), "clip": [mdl, 1]})
-        neg = self._node("CLIPTextEncode", {"text": self._negative(prompt, anatomy), "clip": [mdl, 1]})
+        neg = self._node("CLIPTextEncode", {"text": self._negative(prompt, anatomy, negative_prompt), "clip": [mdl, 1]})
         self.nodes[cna]["inputs"]["conditioning"] = [pos, 0]
 
         latent = self._node("EmptyLatentImage", {"width": width, "height": height, "batch_size": 1})
@@ -116,7 +118,7 @@ class Builder:
         return self.nodes
 
     # ── Task: Inpaint (Wardrobe / Retouch) ───────────────────────────
-    def inpaint(self, prompt, image, mask, task="wardrobe", width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, denoise=0.75, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH):
+    def inpaint(self, prompt, image, mask, task="wardrobe", width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, denoise=0.75, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, negative_prompt=None):
         self.nodes = {}
         self.id_counter = 0
         if seed == -1: seed = random.randint(0, 2**32 - 1)
@@ -128,7 +130,7 @@ class Builder:
         vae_in = self._node("VAEEncodeForInpaint", {"pixels": [img, 0], "mask": [msk, 1], "vae": [ckpt, 2], "grow_mask_by": 6})
 
         pos = self._node("CLIPTextEncode", {"text": self._prompt(task, prompt, anatomy), "clip": [mdl, 1]})
-        neg = self._node("CLIPTextEncode", {"text": self._negative(prompt, anatomy), "clip": [mdl, 1]})
+        neg = self._node("CLIPTextEncode", {"text": self._negative(prompt, anatomy, negative_prompt), "clip": [mdl, 1]})
 
         sampler = self._node("KSampler", {"model": [mdl, 0], "positive": [pos, 0], "negative": [neg, 0], "latent_image": [vae_in, 0], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler_ancestral", "scheduler": "normal", "denoise": denoise})
         vae = self._node("VAEDecode", {"samples": [sampler, 0], "vae": [ckpt, 2]})
@@ -136,7 +138,7 @@ class Builder:
         return self.nodes
 
     # ── Task: Refine (img2img / upscale) ────────────────────────────
-    def refine(self, image, prompt="", denoise=0.5, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, upscale=None, lora=None, lora_strength=DEFAULT_LORA_STRENGTH):
+    def refine(self, image, prompt="", denoise=0.5, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, upscale=None, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, negative_prompt=None):
         self.nodes = {}
         self.id_counter = 0
         if seed == -1: seed = random.randint(0, 2**32 - 1)
@@ -152,7 +154,7 @@ class Builder:
             latent = [up, 0]
 
         pos = self._node("CLIPTextEncode", {"text": prompt or "high quality, detailed", "clip": [mdl, 1]})
-        neg = self._node("CLIPTextEncode", {"text": DEFAULT_NEGATIVE, "clip": [mdl, 1]})
+        neg = self._node("CLIPTextEncode", {"text": DEFAULT_NEGATIVE + (negative_prompt ? ", " + negative_prompt : ""), "clip": [mdl, 1]})
 
         sampler = self._node("KSampler", {"model": [mdl, 0], "positive": [pos, 0], "negative": [neg, 0], "latent_image": latent, "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler_ancestral", "scheduler": "normal", "denoise": denoise})
         vae = self._node("VAEDecode", {"samples": [sampler, 0], "vae": [ckpt, 2]})

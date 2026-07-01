@@ -76,6 +76,7 @@ def list_loras():
 async def generate(
     task: str = Form(...),
     prompt: str = Form(...),
+    negative_prompt: str = Form(None),
     width: int = Form(DEFAULT_WIDTH),
     height: int = Form(DEFAULT_HEIGHT),
     steps: int = Form(DEFAULT_STEPS),
@@ -93,7 +94,7 @@ async def generate(
     if not comfy.is_ready():
         raise HTTPException(503, "ComfyUI is not running. Start it first.")
 
-    params = {"prompt": prompt, "width": width, "height": height, "steps": steps, "cfg": cfg, "seed": seed, "model": model, "anatomy": anatomy, "lora": lora, "lora_strength": lora_strength}
+    params = {"prompt": prompt, "negative_prompt": negative_prompt, "width": width, "height": height, "steps": steps, "cfg": cfg, "seed": seed, "model": model, "anatomy": anatomy, "lora": lora, "lora_strength": lora_strength}
 
     if task == "face":
         if not reference_image: raise HTTPException(400, "Need reference_image")
