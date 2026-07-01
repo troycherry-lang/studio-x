@@ -130,14 +130,46 @@ def main():
     
     print("[..] Opening window...")
     
+    # Show a loading window first, then switch to the app when backend is ready
+    loading_html = '''<!DOCTYPE html>
+<html>
+<head>
+<style>
+body { margin:0; display:flex; align-items:center; justify-content:center; height:100vh; background:#0f1115; color:#e8eaed; font-family:Inter,sans-serif; }
+.loader { text-align:center; }
+.spinner { width:40px; height:40px; border:3px solid #2a3040; border-top-color:#8ab4f8; border-radius:50%; animation:spin 1s linear infinite; margin:0 auto 16px; }
+@keyframes spin { to { transform:rotate(360deg); } }
+h1 { font-size:20px; margin:0 0 8px; }
+p { font-size:13px; color:#9aa0a6; margin:0; }
+</style>
+</head>
+<body>
+<div class="loader">
+  <div class="spinner"></div>
+  <h1>Studio Pro</h1>
+  <p>Starting AI engine...</p>
+</div>
+</body>
+</html>'''
+    
     window = webview.create_window(
         "Studio Pro",
-        "http://127.0.0.1:7875",
+        html=loading_html,
         width=1400,
         height=900,
         min_size=(1000, 700),
     )
     
+    # After window opens, wait for backend then navigate to the app
+    def wait_and_load():
+        for i in range(60):
+            if is_port_ready(7875):
+                window.load_url("http://127.0.0.1:7875")
+                return
+            time.sleep(1)
+        window.load_url("http://127.0.0.1:7875")
+    
+    threading.Thread(target=wait_and_load, daemon=True).start()
     webview.start(on_closing)
 
 if __name__ == "__main__":
