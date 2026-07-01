@@ -22,6 +22,15 @@ const RATIOS = [
   { label: '4:3', w: 1344, h: 1024, hint: 'Landscape' },
 ];
 
+const BODY_FEATURES = [
+  { id: 'large_areolas', label: 'Large areolas', pos: 'large dark areolas, prominent nipples', neg: 'small areolas, pale nipples' },
+  { id: 'sagging', label: 'Natural sagging', pos: 'sagging natural breasts, breast ptosis, soft pendulous tissue, gravity-affected', neg: 'perky, lifted, firm, silicone, implants' },
+  { id: 'uneven', label: 'Slightly uneven', pos: 'slightly asymmetrical breasts, one breast larger, natural unevenness', neg: 'symmetrical, perfectly matched, identical breasts' },
+  { id: 'mature', label: 'Mature / aged', pos: 'mature woman in her 50s, aged soft skin, natural aging, post-menopausal body', neg: 'young, teen, youthful, smooth flawless skin' },
+  { id: 'veins', label: 'Visible veins', pos: 'visible blue veins on breasts, translucent skin, vascular detail', neg: 'smooth skin, no veins, opaque skin' },
+  { id: 'stretch_marks', label: 'Stretch marks', pos: 'stretch marks on skin, natural skin texture, lived-in body', neg: 'flawless skin, perfect smooth skin, no blemishes' },
+];
+
 export default function App() {
   const [task, setTask] = useState('create');
   const [prompt, setPrompt] = useState('');
@@ -31,6 +40,8 @@ export default function App() {
   const [cfg, setCfg] = useState(7);
   const [seed, setSeed] = useState(-1);
   const [anatomy, setAnatomy] = useState(false);
+  const [realism, setRealism] = useState(false);
+  const [features, setFeatures] = useState({});
   const [model, setModel] = useState('juggernautXL_v8Rundiffusion.safetensors');
   const [models, setModels] = useState([]);
   const [loras, setLoras] = useState([]);
@@ -46,7 +57,6 @@ export default function App() {
   const [backendReady, setBackendReady] = useState(false);
   const pollRef = useRef(null);
 
-  // Detect body keywords for UI feedback
   const BODY_KEYWORDS = ['full body', 'head to toe', 'feet', 'legs', 'nude', 'naked', 'topless', 'breasts', 'nipples', 'vagina', 'pussy', 'genitals', 'shaved', 'trimmed', 'pubic hair', 'dildo', 'masturbating'];
   const hasBodyKeywords = BODY_KEYWORDS.some(kw => prompt.toLowerCase().includes(kw));
 
@@ -55,6 +65,30 @@ export default function App() {
     fetch(`${API}/api/models`).then(r => r.json()).then(d => { if (d.length) setModels(d); }).catch(() => {});
     fetch(`${API}/api/loras`).then(r => r.json()).then(d => setLoras(d || [])).catch(() => setLoras([]));
   }, []);
+
+  const toggleFeature = (id) => {
+    setFeatures(prev => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const buildPrompt = () => {
+    let positive = prompt.trim();
+    let negative = '';
+
+    if (realism) {
+      positive += positive ? ', ' : '';
+      positive += 'natural imperfect body, realistic proportions, amateur photography, unposed, candid, authentic skin, no makeup, no retouching';
+      negative += 'perfect body, idealized, symmetrical, centerfold, playboy, glamour, magazine retouch, smooth skin, botox, implants, plastic surgery, barbie, doll, mannequin';
+    }
+
+    BODY_FEATURES.forEach(f => {
+      if (features[f.id]) {
+        if (f.pos) positive += positive ? ', ' + f.pos : f.pos;
+        if (f.neg) negative += negative ? ', ' + f.neg : f.neg;
+      }
+    });
+
+    return { positive, negative };
+  };
 
   const needsRef = task !== 'create';
   const needsPose = task === 'pose';
@@ -74,6 +108,9 @@ export default function App() {
     if (needsPose && !poseImage) { alert('Upload pose image'); return; }
     if (needsMask && !maskImage) { alert('Upload mask'); return; }
 
+    const { positive, negative } = buildPrompt();
+    const effectiveCfg = realism ? 10 : cfg;
+
     setGenerating(true);
     setProgress(0);
     setResultUrl('');
@@ -81,11 +118,12 @@ export default function App() {
 
     const f = new FormData();
     f.append('task', task);
-    f.append('prompt', prompt);
+    f.append('prompt', positive);
+    if (negative) f.append('negative_prompt', negative);
     f.append('width', String(width));
     f.append('height', String(height));
     f.append('steps', String(steps));
-    f.append('cfg', String(cfg));
+    f.append('cfg', String(effectiveCfg));
     f.append('seed', String(seed));
     f.append('model', model);
     f.append('anatomy', String(anatomy));
@@ -222,8 +260,8 @@ export default function App() {
           </div>
 
           <div className="field row">
-            <label>Guidance: {cfg}</label>
-            <input type="range" min={3} max={12} step={0.5} value={cfg} onChange={e => setCfg(Number(e.target.value))} />
+            <label>Guidance: {realism ? `${cfg} → 10 (Realism)` : cfg}</label>
+            <input type="range" min={3} max={12} step={0.5} value={cfg} onChange={e => setCfg(Number(e.target.value))} disabled={realism} />
           </div>
 
           <div className="field row">
@@ -237,6 +275,26 @@ export default function App() {
               <input type="checkbox" checked={anatomy} onChange={e => setAnatomy(e.target.checked)} />
               Enhanced realism (natural skin texture)
             </label>
+          </div>
+
+          <div className="realism-panel">
+            <div className="realism-header">
+              <label className="check">
+                <input type="checkbox" checked={realism} onChange={e => setRealism(e.target.checked)} />
+                <b>Realism Mode</b> — natural, imperfect bodies
+              </label>
+              {realism && <span className="realism-active">CFG forced to 10</span>}
+            </div>
+            {realism && (
+              <div className="feature-grid">
+                {BODY_FEATURES.map(f => (
+                  <label key={f.id} className={`feature-check ${features[f.id] ? 'active' : ''}`}>
+                    <input type="checkbox" checked={!!features[f.id]} onChange={() => toggleFeature(f.id)} />
+                    {f.label}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
 
           <button className="generate" onClick={generate} disabled={generating || !backendReady}>

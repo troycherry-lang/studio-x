@@ -110,3 +110,14 @@ label.check input { width: 16px; height: 16px; accent-color: var(--accent); }
 /* Responsive */
 @media (max-width: 1200px) { .preview { width: 300px; } }
 @media (max-width: 900px) { .sidebar { width: 200px; } .preview { width: 260px; } .sidebar small { display: none; } }
+
+/* Realism Panel */
+.realism-panel { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg3); padding: 14px; margin-bottom: 16px; }
+.realism-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0; }
+.realism-header .check { font-size: 14px; color: var(--text); }
+.realism-active { font-size: 11px; color: var(--accent); font-weight: 600; background: var(--accentbg); padding: 2px 8px; border-radius: 4px; }
+.feature-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+.feature-check { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--bg2); cursor: pointer; font-size: 12px; color: var(--text2); transition: 0.15s; }
+.feature-check:hover { background: var(--bg); color: var(--text); }
+.feature-check.active { background: var(--accentbg); border-color: var(--accent); color: var(--accent); }
+.feature-check input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
