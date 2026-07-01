@@ -46,7 +46,18 @@ def start_comfyui():
     print("[ERROR] ComfyUI did not start within 60 seconds.")
     return p
 
+def is_backend_running():
+    try:
+        import urllib.request
+        urllib.request.urlopen("http://127.0.0.1:7875/api/health", timeout=2)
+        return True
+    except:
+        return False
+
 def start_backend():
+    if is_backend_running():
+        print("[OK] Studio Pro backend already running.")
+        return None
     print("[..] Starting Studio Pro backend...")
     p = subprocess.Popen(
         [PYTHON, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "7875", "--log-level", "warning"],
@@ -58,13 +69,9 @@ def start_backend():
     # Wait for backend to be ready
     for i in range(30):
         time.sleep(1)
-        try:
-            import urllib.request
-            urllib.request.urlopen("http://127.0.0.1:7875/api/health", timeout=2)
+        if is_backend_running():
             print("[OK] Studio Pro backend ready.")
             return p
-        except:
-            pass
     print("[ERROR] Backend did not start within 30 seconds.")
     return p
 
