@@ -2,7 +2,7 @@
 # Builds ComfyUI JSON node graphs for each task.
 
 import random
-from config import DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG, DEFAULT_LORA_STRENGTH, DEFAULT_NEGATIVE, BODY_KEYWORDS, BODY_POSITIVE, BODY_NEGATIVE
+from config import DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG, DEFAULT_LORA_STRENGTH, DEFAULT_NEGATIVE, PORTRAIT_KEYWORDS, BODY_KEYWORDS, BODY_POSITIVE, BODY_NEGATIVE
 
 class Builder:
     def __init__(self):
@@ -21,7 +21,9 @@ class Builder:
     def _prompt(self, task, user_text, anatomy=False):
         parts = ["professional photograph, high quality, detailed, realistic lighting"]
         user_lower = user_text.lower()
-        if any(kw in user_lower for kw in BODY_KEYWORDS):
+        # Full body is DEFAULT unless user explicitly asks for portrait/close-up
+        is_portrait = any(kw in user_lower for kw in PORTRAIT_KEYWORDS)
+        if not is_portrait:
             parts.append(BODY_POSITIVE)
         parts.append(user_text)
         if anatomy:
@@ -31,7 +33,9 @@ class Builder:
     def _negative(self, user_text, anatomy=False, custom_negative=None):
         parts = [DEFAULT_NEGATIVE]
         user_lower = user_text.lower()
-        if any(kw in user_lower for kw in BODY_KEYWORDS):
+        # Anti-crop is always included by default now
+        is_portrait = any(kw in user_lower for kw in PORTRAIT_KEYWORDS)
+        if not is_portrait:
             parts.append(BODY_NEGATIVE)
         if anatomy:
             parts.append("smooth skin, barbie, doll, mannequin, plastic, censored")

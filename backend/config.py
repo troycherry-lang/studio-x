@@ -44,12 +44,20 @@ NATURAL_NEGATIVE = (
 
 DEFAULT_NEGATIVE = f"{QUALITY_NEGATIVE}, {SAFETY_NEGATIVE}, {NATURAL_NEGATIVE}"
 
-# Auto body-keyword injection
+# Auto body-keyword injection — FULL BODY is DEFAULT
+# Only skip full-body if user explicitly asks for a close-up/portrait
+PORTRAIT_KEYWORDS = [
+    "close up", "close-up", "portrait", "headshot", "face only",
+    "upper body", "bust", "torso", "waist up", "chest up",
+    "shoulders up", "head and shoulders", "profile", "selfie",
+]
+
 BODY_KEYWORDS = [
     "full body", "head to toe", "feet", "legs", "nude", "naked",
     "topless", "breasts", "nipples", "vagina", "pussy", "genitals",
     "shaved", "trimmed", "pubic hair", "dildo", "masturbating",
 ]
 
-BODY_POSITIVE = "full body, head to toe, complete anatomy, natural proportions, realistic skin texture"
-BODY_NEGATIVE = "cropped, missing legs, missing feet, cut off"
+# Always inject full body by default
+BODY_POSITIVE = "full body, head to toe, standing, complete anatomy, entire figure visible, natural proportions, feet visible, legs visible"
+BODY_NEGATIVE = "cropped, missing legs, missing feet, cut off, waist up, upper body only, close up, portrait framing, headshot"
