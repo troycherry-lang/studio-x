@@ -31,6 +31,15 @@ const BODY_FEATURES = [
   { id: 'stretch_marks', label: 'Stretch marks', pos: 'stretch marks on skin, natural skin texture, lived-in body', neg: 'flawless skin, perfect smooth skin, no blemishes' },
 ];
 
+const BODY_PRESET_OPTIONS = [
+  { value: 'default', label: 'Default (no bias)' },
+  { value: 'athletic', label: 'Athletic / Toned' },
+  { value: 'voluptuous', label: 'Curvy / Voluptuous' },
+  { value: 'slender', label: 'Tall / Slender / Model' },
+  { value: 'petite', label: 'Petite / Small Frame' },
+  { value: 'muscular', label: 'Muscular / Fit' },
+];
+
 export default function App() {
   const [task, setTask] = useState('create');
   const [prompt, setPrompt] = useState('');
@@ -55,13 +64,22 @@ export default function App() {
   const [status, setStatus] = useState('Ready');
   const [resultUrl, setResultUrl] = useState('');
   const [backendReady, setBackendReady] = useState(false);
+  const [fluxEnabled, setFluxEnabled] = useState(false);
+  const [bodyPreset, setBodyPreset] = useState('default');
+  const [weightStrength, setWeightStrength] = useState(1.0);
+  const [useFlux, setUseFlux] = useState(false);
+  const [fluxGuidance, setFluxGuidance] = useState(3.5);
   const pollRef = useRef(null);
 
   const PORTRAIT_KEYWORDS = ['close up', 'close-up', 'portrait', 'headshot', 'face only', 'upper body', 'bust', 'torso', 'waist up', 'chest up', 'shoulders up', 'head and shoulders', 'profile', 'selfie'];
   const isPortrait = PORTRAIT_KEYWORDS.some(kw => prompt.toLowerCase().includes(kw));
 
+  // Fetch config on mount
   useEffect(() => {
     fetch(`${API}/api/health`).then(r => r.json()).then(d => setBackendReady(d.comfyui)).catch(() => setBackendReady(false));
+    fetch(`${API}/api/config`).then(r => r.json()).then(d => {
+      if (d.flux_enabled) setFluxEnabled(true);
+    }).catch(() => {});
     fetch(`${API}/api/models`).then(r => r.json()).then(d => { if (d.length) setModels(d); }).catch(() => {});
     fetch(`${API}/api/loras`).then(r => r.json()).then(d => setLoras(d || [])).catch(() => setLoras([]));
   }, []);
@@ -125,8 +143,15 @@ export default function App() {
     f.append('steps', String(steps));
     f.append('cfg', String(effectiveCfg));
     f.append('seed', String(seed));
-    f.append('model', model);
+    // Use Flux model if toggled
+    f.append('model', useFlux ? `flux:${model}` : model);
     f.append('anatomy', String(anatomy));
+    f.append('body_preset', bodyPreset);
+    f.append('weight_strength', String(weightStrength));
+    if (useFlux) {
+      f.append('flux', 'true');
+      f.append('flux_guidance', String(fluxGuidance));
+    }
     if (lora && lora !== 'None') {
       f.append('lora', lora);
       f.append('lora_strength', String(loraStrength));
@@ -168,13 +193,15 @@ export default function App() {
     }
   };
 
+  const presetLabel = BODY_PRESET_OPTIONS.find(p => p.value === bodyPreset)?.label || 'Default';
+
   return (
     <div className="app">
       <header className="header">
         <div className="brand">
           <span className="logo">◈</span>
           <div>
-            <h1>Studio Pro</h1>
+            <h1>Studio Pro <span className="version">v3.1</span></h1>
             <span className="tagline">Portrait & Image Editor</span>
           </div>
         </div>
@@ -218,12 +245,60 @@ export default function App() {
             {task === 'refine' && <div className="tag hint">Upload a photo to refine, vary, or upscale.</div>}
           </div>
 
+          {/* Body Type Preset */}
+          <div className="field">
+            <label>Body Type Preset <span className="hint-text">— push the model away from "average"</span></label>
+            <div className="preset-row">
+              <select value={bodyPreset} onChange={e => setBodyPreset(e.target.value)} className="preset-select">
+                {BODY_PRESET_OPTIONS.map(p => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
+              {bodyPreset !== 'default' && (
+                <span className="preset-badge active">{presetLabel}</span>
+              )}
+            </div>
+            {bodyPreset !== 'default' && (
+              <div className="preset-desc">
+                Injecting weighted keywords for {presetLabel.toLowerCase()}. Combine with CFG 7-8 for strongest effect.
+              </div>
+            )}
+          </div>
+
+          {/* Prompt Weight Strength */}
+          <div className="field row">
+            <label>Prompt Emphasis: {weightStrength.toFixed(1)}x</label>
+            <input type="range" min={0.5} max={2.0} step={0.1} value={weightStrength} onChange={e => setWeightStrength(Number(e.target.value))} />
+            <div className="weight-hints">
+              <span className={weightStrength <= 0.8 ? 'active' : ''}>Subtle</span>
+              <span className={weightStrength > 0.8 && weightStrength <= 1.2 ? 'active' : ''}>Normal</span>
+              <span className={weightStrength > 1.2 && weightStrength <= 1.6 ? 'active' : ''}>Strong</span>
+              <span className={weightStrength > 1.6 ? 'active' : ''}>Intense</span>
+            </div>
+          </div>
+
           <div className="field">
             <label>Model</label>
             <select value={model} onChange={e => setModel(e.target.value)}>
-              {models.map(m => <option key={m} value={m}>{m.replace('.safetensors', '')}</option>)}
+              {models.map(m => <option key={m} value={m}>{m.replace('.safetensors', '').replace('flux:', '[Flux] ')}</option>)}
             </select>
           </div>
+
+          {/* Flux Toggle */}
+          {fluxEnabled && (
+            <div className="flux-panel">
+              <label className="check flux-check">
+                <input type="checkbox" checked={useFlux} onChange={e => setUseFlux(e.target.checked)} />
+                <b>Flux Mode</b> — better prompt understanding, slower
+              </label>
+              {useFlux && (
+                <div className="field row flux-guidance">
+                  <label>Flux Guidance: {fluxGuidance}</label>
+                  <input type="range" min={1.0} max={10.0} step={0.5} value={fluxGuidance} onChange={e => setFluxGuidance(Number(e.target.value))} />
+                </div>
+              )}
+            </div>
+          )}
 
           {loras.length > 0 && (
             <>
@@ -298,7 +373,7 @@ export default function App() {
           </div>
 
           <button className="generate" onClick={generate} disabled={generating || !backendReady}>
-            {generating ? 'Generating...' : '✨ Generate'}
+            {generating ? 'Generating...' : `✨ Generate ${useFlux ? '(Flux)' : ''}`}
           </button>
         </main>
 
