@@ -1,5 +1,5 @@
-# Studio Pro v3.0 — FastAPI Backend
-# Clean REST API. No adapters. No legacy code.
+# Studio Pro v3.1 — FastAPI Backend
+# Clean REST API. Body presets, prompt weighting, Flux support.
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -9,7 +9,11 @@ from pathlib import Path
 from datetime import datetime
 import json, os, shutil
 
-from config import HOST, PORT, UPLOAD_DIR, OUTPUT_DIR, COMFYUI_DIR, LORA_DIR, DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG, DEFAULT_LORA_STRENGTH
+from config import (
+    HOST, PORT, UPLOAD_DIR, OUTPUT_DIR, COMFYUI_DIR, LORA_DIR,
+    DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG,
+    DEFAULT_LORA_STRENGTH, BODY_PRESETS, FLUX_ENABLED,
+)
 from comfy_client import comfy
 from workflows import build
 
@@ -18,8 +22,8 @@ UPLOAD_PATH = Path(UPLOAD_DIR)
 UPLOAD_PATH.mkdir(exist_ok=True)
 
 # ── App ──────────────────────────────────────────────────────────────
-app = FastAPI(title="Studio Pro", version="3.0.0")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app = FastAPI(title="Studio Pro", version="3.1.0")
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]))
 
 # Serve static assets
 assets = BASE_DIR / "frontend" / "dist" / "assets"
@@ -32,7 +36,18 @@ jobs = {}
 # ── Health ───────────────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "comfyui": comfy.is_ready()}
+    return {"status": "ok", "comfyui": comfy.is_ready(), "version": "3.1.0", "flux_enabled": FLUX_ENABLED}
+
+# ── Config ───────────────────────────────────────────────────────────
+@app.get("/api/config")
+def get_config():
+    """Return app configuration for the frontend."""
+    return {
+        "body_presets": {k: v["label"] for k, v in BODY_PRESETS.items()},
+        "flux_enabled": FLUX_ENABLED,
+        "default_cfg": DEFAULT_CFG,
+        "default_steps": DEFAULT_STEPS,
+    }
 
 # ── Upload ──────────────────────────────────────────────────────────
 @app.post("/api/upload")
@@ -48,7 +63,7 @@ async def upload(file: UploadFile = File(...)):
 # ── Models ──────────────────────────────────────────────────────────
 @app.get("/api/models")
 def list_models():
-    """List available checkpoint models from ComfyUI's checkpoints directory."""
+    """List available checkpoint models from ComfyUI."""
     ckpt_dir = Path(COMFYUI_DIR) / "models" / "checkpoints"
     if not ckpt_dir.exists():
         return []
@@ -56,6 +71,12 @@ def list_models():
     for f in ckpt_dir.iterdir():
         if f.suffix.lower() in (".safetensors", ".ckpt", ".pt"):
             files.append(f.name)
+    # Also list Flux UNET models
+    unet_dir = Path(COMFYUI_DIR) / "models" / "unet"
+    if unet_dir.exists():
+        for f in unet_dir.iterdir():
+            if f.suffix.lower() in (".safetensors", ".pt") and "flux" in f.name.lower():
+                files.append(f"flux:{f.name}")
     return sorted(files)
 
 # ── LoRAs ───────────────────────────────────────────────────────────
@@ -90,11 +111,38 @@ async def generate(
     pose_image: str = Form(None),
     mask_image: str = Form(None),
     denoise: float = Form(0.75),
+    body_preset: str = Form("default"),
+    weight_strength: float = Form(1.0),
+    flux: bool = Form(False),
+    flux_guidance: float = Form(None),
 ):
     if not comfy.is_ready():
         raise HTTPException(503, "ComfyUI is not running. Start it first.")
 
-    params = {"prompt": prompt, "negative_prompt": negative_prompt, "width": width, "height": height, "steps": steps, "cfg": cfg, "seed": seed, "model": model, "anatomy": anatomy, "lora": lora, "lora_strength": lora_strength}
+    # Auto-detect Flux model
+    is_flux = flux or model.startswith("flux:")
+    if is_flux:
+        model = model.replace("flux:", "") if model.startswith("flux:") else model
+
+    params = {
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "width": width,
+        "height": height,
+        "steps": steps,
+        "cfg": cfg,
+        "seed": seed,
+        "model": model,
+        "anatomy": anatomy,
+        "lora": lora,
+        "lora_strength": lora_strength,
+        "body_preset": body_preset,
+        "weight_strength": weight_strength,
+        "flux": is_flux,
+    }
+
+    if is_flux and flux_guidance:
+        params["flux_guidance"] = flux_guidance
 
     if task == "face":
         if not reference_image: raise HTTPException(400, "Need reference_image")
@@ -129,7 +177,6 @@ async def generate(
 @app.get("/api/progress/{job_id}")
 def progress(job_id: str):
     if job_id not in jobs:
-        # Check if already completed in ComfyUI history
         try:
             hist = comfy.get_history(job_id)
             if job_id in hist:
@@ -141,7 +188,6 @@ def progress(job_id: str):
     if job["status"] == "completed":
         return {"job_id": job_id, "status": "completed", "progress": 100, "outputs": job["outputs"]}
 
-    # Check ComfyUI history
     try:
         hist = comfy.get_history(job_id)
         if job_id in hist:
@@ -156,8 +202,7 @@ def progress(job_id: str):
                                 outs.append(item["filename"])
             job["outputs"] = outs
             return {"job_id": job_id, "status": "completed", "progress": 100, "outputs": outs}
-    except:
-        pass
+    except: pass
 
     return {"job_id": job_id, "status": job["status"], "progress": 0, "outputs": []}
 
@@ -174,7 +219,6 @@ def result(job_id: str):
     filename = job["outputs"][0]
     try:
         data = comfy.get_image(filename)
-        # Also save to StudioPro outputs folder for user access
         out_path = Path(OUTPUT_DIR) / filename
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "wb") as f:
