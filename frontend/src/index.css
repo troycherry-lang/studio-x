@@ -148,3 +148,20 @@ label.check input { width: 16px; height: 16px; accent-color: var(--accent); }
 .feature-check:hover { background: var(--bg); color: var(--text); }
 .feature-check.active { background: var(--accentbg); border-color: var(--accent); color: var(--accent); }
 .feature-check input { width: 16px; height: 16px; accent-color: var(--accent); cursor: pointer; }
+
+/* Body Presets */
+.preset-row { display: flex; align-items: center; gap: 10px; }
+.preset-select { flex: 1; }
+.preset-badge { font-size: 11px; color: var(--accent); font-weight: 600; background: var(--accentbg); padding: 4px 10px; border-radius: 4px; white-space: nowrap; }
+.preset-desc { font-size: 11px; color: var(--text3); margin-top: 6px; }
+.hint-text { font-size: 11px; color: var(--text3); font-weight: 400; text-transform: none; letter-spacing: 0; margin-left: 4px; }
+
+/* Weight hints */
+.weight-hints { display: flex; gap: 6px; margin-top: 6px; }
+.weight-hints span { flex: 1; text-align: center; font-size: 10px; color: var(--text3); padding: 3px 4px; border-radius: 4px; background: var(--bg2); border: 1px solid var(--border); }
+.weight-hints span.active { background: var(--accentbg); border-color: var(--accent); color: var(--accent); }
+
+/* Flux panel */
+.flux-panel { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg3); padding: 14px; margin-bottom: 16px; }
+.flux-check { font-size: 14px; color: var(--text); }
+.flux-guidance { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }

@@ -1,5 +1,5 @@
-# Studio Pro v3.0 — FastAPI Backend
-# Clean REST API. No adapters. No legacy code.
+# Studio Pro v3.1 — FastAPI Backend
+# Clean REST API. Body presets, prompt weighting, Flux support, multi-LoRA, Hi-Res Fix.
 
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -8,9 +8,13 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from datetime import datetime
 import json, os, shutil, re, random, base64
-from datetime import datetime
 
-from config import HOST, PORT, UPLOAD_DIR, OUTPUT_DIR, COMFYUI_DIR, LORA_DIR, DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG, DEFAULT_LORA_STRENGTH, DEFAULT_UPSCALE, SUPPORTED_UPSCALES, HISTORY_DIR
+from config import (
+    HOST, PORT, UPLOAD_DIR, OUTPUT_DIR, COMFYUI_DIR, LORA_DIR,
+    DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG,
+    DEFAULT_LORA_STRENGTH, DEFAULT_UPSCALE, SUPPORTED_UPSCALES, HISTORY_DIR,
+    BODY_PRESETS, FLUX_ENABLED,
+)
 from comfy_client import comfy
 from workflows import build
 
@@ -19,7 +23,7 @@ UPLOAD_PATH = Path(UPLOAD_DIR)
 UPLOAD_PATH.mkdir(exist_ok=True)
 
 # ── App ──────────────────────────────────────────────────────────────
-app = FastAPI(title="Studio Pro", version="3.0.0")
+app = FastAPI(title="Studio Pro", version="3.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 # Serve static assets
@@ -77,7 +81,18 @@ def _clamp_upscale(value):
 # ── Health ───────────────────────────────────────────────────────────
 @app.get("/api/health")
 def health():
-    return {"status": "ok", "comfyui": comfy.is_ready()}
+    return {"status": "ok", "comfyui": comfy.is_ready(), "version": "3.1.0", "flux_enabled": FLUX_ENABLED}
+
+# ── Config ───────────────────────────────────────────────────────────
+@app.get("/api/config")
+def get_config():
+    """Return app configuration for the frontend."""
+    return {
+        "body_presets": {k: v["label"] for k, v in BODY_PRESETS.items()},
+        "flux_enabled": FLUX_ENABLED,
+        "default_cfg": DEFAULT_CFG,
+        "default_steps": DEFAULT_STEPS,
+    }
 
 # ── Upload ──────────────────────────────────────────────────────────
 @app.post("/api/upload")
@@ -93,14 +108,19 @@ async def upload(file: UploadFile = File(...)):
 # ── Models ──────────────────────────────────────────────────────────
 @app.get("/api/models")
 def list_models():
-    """List available checkpoint models from ComfyUI's checkpoints directory."""
+    """List available checkpoint models from ComfyUI."""
     ckpt_dir = Path(COMFYUI_DIR) / "models" / "checkpoints"
-    if not ckpt_dir.exists():
-        return []
     files = []
-    for f in ckpt_dir.iterdir():
-        if f.suffix.lower() in (".safetensors", ".ckpt", ".pt"):
-            files.append(f.name)
+    if ckpt_dir.exists():
+        for f in ckpt_dir.iterdir():
+            if f.suffix.lower() in (".safetensors", ".ckpt", ".pt"):
+                files.append(f.name)
+    # Also list Flux UNET models
+    unet_dir = Path(COMFYUI_DIR) / "models" / "unet"
+    if unet_dir.exists():
+        for f in unet_dir.iterdir():
+            if f.suffix.lower() in (".safetensors", ".pt") and "flux" in f.name.lower():
+                files.append(f"flux:{f.name}")
     return sorted(files)
 
 # ── LoRAs ───────────────────────────────────────────────────────────
@@ -137,9 +157,18 @@ async def generate(
     pose_image: str = Form(None),
     mask_image: str = Form(None),
     denoise: float = Form(0.75),
+    body_preset: str = Form("default"),
+    weight_strength: float = Form(1.0),
+    flux: bool = Form(False),
+    flux_guidance: float = Form(None),
 ):
     if not comfy.is_ready():
         raise HTTPException(503, "ComfyUI is not running. Start it first.")
+
+    # Auto-detect Flux model
+    is_flux = flux or model.startswith("flux:")
+    if is_flux:
+        model = model.replace("flux:", "") if model.startswith("flux:") else model
 
     # Build LoRA list: legacy single lora + new multi-lora list
     lora_list = _parse_loras(loras)
@@ -151,13 +180,26 @@ async def generate(
         seed = random.randint(0, 2**32 - 1)
 
     params = {
-        "prompt": prompt, "negative_prompt": negative_prompt,
-        "width": width, "height": height, "steps": steps, "cfg": cfg,
-        "seed": seed, "model": model, "anatomy": anatomy,
-        "lora": lora, "lora_strength": lora_strength,
+        "prompt": prompt,
+        "negative_prompt": negative_prompt,
+        "width": width,
+        "height": height,
+        "steps": steps,
+        "cfg": cfg,
+        "seed": seed,
+        "model": model,
+        "anatomy": anatomy,
+        "lora": lora,
+        "lora_strength": lora_strength,
         "loras": lora_list,
         "upscale": _clamp_upscale(upscale),
+        "body_preset": body_preset,
+        "weight_strength": weight_strength,
+        "flux": is_flux,
     }
+
+    if is_flux and flux_guidance:
+        params["flux_guidance"] = flux_guidance
 
     if task == "face":
         if not reference_image: raise HTTPException(400, "Need reference_image")
@@ -192,6 +234,8 @@ async def generate(
             "width": width, "height": height, "steps": steps, "cfg": cfg,
             "seed": seed, "model": model, "anatomy": anatomy,
             "loras": lora_list, "upscale": params["upscale"],
+            "body_preset": body_preset, "weight_strength": weight_strength,
+            "flux": is_flux,
         }
     }
     return {"job_id": prompt_id, "status": "queued", "seed": seed}
@@ -200,6 +244,11 @@ async def generate(
 @app.get("/api/progress/{job_id}")
 def progress(job_id: str):
     if job_id not in jobs:
+        try:
+            hist = comfy.get_history(job_id)
+            if job_id in hist:
+                return {"job_id": job_id, "status": "completed", "progress": 100, "outputs": []}
+        except: pass
         raise HTTPException(404, "Job not found")
 
     prog = comfy.get_progress(job_id)
@@ -215,6 +264,7 @@ def progress(job_id: str):
         "outputs": jobs[job_id].get("outputs", []),
         "error": prog.get("error"),
     }
+
 
 def _save_history(job_id: str, image_data: bytes):
     """Persist generated image + metadata to the history folder."""
@@ -254,7 +304,6 @@ def result(job_id: str):
     filename = job["outputs"][0]
     try:
         data = comfy.get_image(filename)
-        # Also save to StudioPro outputs folder for user access
         out_path = Path(OUTPUT_DIR) / filename
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "wb") as f:

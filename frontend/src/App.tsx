@@ -84,13 +84,24 @@ export default function App() {
   const [backendReady, setBackendReady] = useState(false);
   const [lastSession, setLastSession] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
+  const [bodyPresets, setBodyPresets] = useState<Record<string, string>>({ default: 'Default (no bias)' });
+  const [fluxEnabled, setFluxEnabled] = useState(false);
+  const [bodyPreset, setBodyPreset] = useState('default');
+  const [weightStrength, setWeightStrength] = useState(1.0);
+  const [useFlux, setUseFlux] = useState(false);
+  const [fluxGuidance, setFluxGuidance] = useState(3.5);
   const pollRef = useRef<number | null>(null);
 
   const PORTRAIT_KEYWORDS = ['close up', 'close-up', 'portrait', 'headshot', 'face only', 'upper body', 'bust', 'torso', 'waist up', 'chest up', 'shoulders up', 'head and shoulders', 'profile', 'selfie'];
   const isPortrait = PORTRAIT_KEYWORDS.some(kw => prompt.toLowerCase().includes(kw));
 
+  // Fetch config on mount
   useEffect(() => {
     fetch(`${API}/api/health`).then(r => r.json()).then(d => setBackendReady(d.comfyui)).catch(() => setBackendReady(false));
+    fetch(`${API}/api/config`).then(r => r.json()).then(d => {
+      if (d.body_presets) setBodyPresets(d.body_presets);
+      if (d.flux_enabled) setFluxEnabled(true);
+    }).catch(() => {});
     fetch(`${API}/api/models`).then(r => r.json()).then(d => { if (Array.isArray(d) && d.length) setModels(d); }).catch(() => {});
     fetch(`${API}/api/loras`).then(r => r.json()).then(d => setLoras(d || [])).catch(() => setLoras([]));
     loadHistory();
@@ -149,7 +160,7 @@ export default function App() {
   const saveSession = () => {
     const session = {
       task, prompt, width, height, steps, cfg, seed, anatomy, realism, features, model,
-      loraSlots, upscale, refImage, poseImage, maskImage,
+      loraSlots, upscale, refImage, poseImage, maskImage, bodyPreset, weightStrength, useFlux, fluxGuidance,
     };
     localStorage.setItem(SESSION_KEY, JSON.stringify(session));
     setLastSession(session);
@@ -170,6 +181,10 @@ export default function App() {
     setModel(lastSession.model || model);
     if (lastSession.loraSlots) setLoraSlots(lastSession.loraSlots);
     setUpscale(lastSession.upscale ?? 1.0);
+    setBodyPreset(lastSession.bodyPreset || 'default');
+    setWeightStrength(lastSession.weightStrength ?? 1.0);
+    setUseFlux(lastSession.useFlux || false);
+    setFluxGuidance(lastSession.fluxGuidance ?? 3.5);
     setRefImage(lastSession.refImage || '');
     setPoseImage(lastSession.poseImage || '');
     setMaskImage(lastSession.maskImage || '');
@@ -187,6 +202,8 @@ export default function App() {
 
     const { positive, negative } = buildPrompt();
     const effectiveCfg = realism ? 10 : cfg;
+    const presetCfgBoost = bodyPreset !== 'default' ? 0.5 : 0;
+    const finalCfg = Math.min(12, effectiveCfg + presetCfgBoost);
 
     setGenerating(true);
     setProgress(0);
@@ -201,11 +218,17 @@ export default function App() {
     f.append('width', String(width));
     f.append('height', String(height));
     f.append('steps', String(steps));
-    f.append('cfg', String(effectiveCfg));
+    f.append('cfg', String(finalCfg));
     f.append('seed', String(seedRef.current));
-    f.append('model', model);
+    f.append('model', useFlux ? `flux:${model}` : model);
     f.append('anatomy', String(anatomy));
+    f.append('body_preset', bodyPreset);
+    f.append('weight_strength', String(weightStrength));
     f.append('upscale', String(upscale));
+    if (useFlux) {
+      f.append('flux', 'true');
+      f.append('flux_guidance', String(fluxGuidance));
+    }
 
     const lorasJson = JSON.stringify(activeLoras());
     f.append('loras', lorasJson);
@@ -234,7 +257,7 @@ export default function App() {
           const rr = await fetch(`${API}/api/result/${jobId}`);
           const blob = await rr.blob();
           setResultUrl(URL.createObjectURL(blob));
-          setResultMeta({ task, prompt, seed: seedRef.current === -1 ? 'random' : seedRef.current, upscale, model, cfg: effectiveCfg });
+          setResultMeta({ task, prompt, seed: seedRef.current === -1 ? 'random' : seedRef.current, upscale, model, cfg: finalCfg, bodyPreset, weightStrength });
           setGenerating(false);
           loadHistory();
         } else if (pd.status === 'error') {
@@ -252,6 +275,8 @@ export default function App() {
   const needsRef = task !== 'create';
   const needsPose = task === 'pose';
   const needsMask = task === 'wardrobe' || task === 'retouch';
+  const presetLabel = bodyPresets[bodyPreset] || 'Default';
+  const bodyPresetOptions = Object.entries(bodyPresets).map(([value, label]) => ({ value, label }));
 
   return (
     <div className="app">
@@ -259,7 +284,7 @@ export default function App() {
         <div className="brand">
           <span className="logo">◈</span>
           <div>
-            <h1>Studio Pro</h1>
+            <h1>Studio Pro <span className="version">v3.1</span></h1>
             <span className="tagline">Portrait & Image Editor</span>
           </div>
         </div>
@@ -311,12 +336,60 @@ export default function App() {
             {task === 'refine' && <div className="tag hint">Upload a photo to refine, vary, or upscale.</div>}
           </div>
 
+          {/* Body Type Preset */}
+          <div className="field">
+            <label>Body Type Preset <span className="hint-text">— push the model away from "average"</span></label>
+            <div className="preset-row">
+              <select value={bodyPreset} onChange={e => setBodyPreset(e.target.value)} className="preset-select">
+                {bodyPresetOptions.map(p => (
+                  <option key={p.value} value={p.value}>{p.label}</option>
+                ))}
+              </select>
+              {bodyPreset !== 'default' && (
+                <span className="preset-badge active">{presetLabel}</span>
+              )}
+            </div>
+            {bodyPreset !== 'default' && (
+              <div className="preset-desc">
+                Injecting weighted keywords for {presetLabel.toLowerCase()}. Combine with CFG 7-8 for strongest effect.
+              </div>
+            )}
+          </div>
+
+          {/* Prompt Weight Strength */}
+          <div className="field row">
+            <label>Prompt Emphasis: {weightStrength.toFixed(1)}x</label>
+            <input type="range" min={0.5} max={2.0} step={0.1} value={weightStrength} onChange={e => setWeightStrength(Number(e.target.value))} />
+            <div className="weight-hints">
+              <span className={weightStrength <= 0.8 ? 'active' : ''}>Subtle</span>
+              <span className={weightStrength > 0.8 && weightStrength <= 1.2 ? 'active' : ''}>Normal</span>
+              <span className={weightStrength > 1.2 && weightStrength <= 1.6 ? 'active' : ''}>Strong</span>
+              <span className={weightStrength > 1.6 ? 'active' : ''}>Intense</span>
+            </div>
+          </div>
+
           <div className="field">
             <label>Model</label>
             <select value={model} onChange={e => setModel(e.target.value)}>
-              {models.map(m => <option key={m} value={m}>{m.replace('.safetensors', '')}</option>)}
+              {models.map(m => <option key={m} value={m}>{m.replace('.safetensors', '').replace('flux:', '[Flux] ')}</option>)}
             </select>
           </div>
+
+          {/* Flux Toggle */}
+          {fluxEnabled && (
+            <div className="flux-panel">
+              <label className="check flux-check">
+                <input type="checkbox" checked={useFlux} onChange={e => setUseFlux(e.target.checked)} />
+                <b>Flux Mode</b> — better prompt understanding, slower
+              </label>
+              {useFlux && (
+                <div className="field row flux-guidance">
+                  <label>Flux Guidance: {fluxGuidance}</label>
+                  <input type="range" min={1.0} max={10.0} step={0.5} value={fluxGuidance} onChange={e => setFluxGuidance(Number(e.target.value))} />
+                </div>
+              )}
+            </div>
+          )}
 
           {loras.length > 0 && (
             <div className="field">
@@ -412,7 +485,7 @@ export default function App() {
           </div>
 
           <button className="generate" onClick={generate} disabled={generating || !backendReady}>
-            {generating ? status : '✨ Generate'}
+            {generating ? status : `✨ Generate ${useFlux ? '(Flux)' : ''}`}
           </button>
         </main>
 
@@ -441,6 +514,8 @@ export default function App() {
               <div>Model: {resultMeta.model.replace('.safetensors', '')}</div>
               <div>Hi-Res: {resultMeta.upscale > 1 ? resultMeta.upscale + 'x' : 'Off'}</div>
               <div>CFG: {resultMeta.cfg}</div>
+              <div>Preset: {resultMeta.bodyPreset}</div>
+              <div>Emphasis: {resultMeta.weightStrength}x</div>
             </div>
           )}
 
