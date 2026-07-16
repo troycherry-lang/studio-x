@@ -1,19 +1,18 @@
-# Studio Pro v3.0 – Compact Context
+# Studio Pro v3.1 — Compact Context
 
 ## Status
-- **Backend**: Running on port 7875 (FastAPI + direct ComfyUI REST client)
+- **Backend**: Running on port 7875 (FastAPI + direct ComfyUI REST/WebSocket client)
 - **ComfyUI**: Running on port 8188 (venv, v0.25.0)
 - **Frontend**: React + Vite, built to `StudioPro-v3/frontend/dist/`
-- **Test result**: ✅ Generated 1.6MB image with user's exact prompt
-- **GitHub push**: ❌ Failed – node_modules included, need `.gitignore` + re-push
-- **Browser UI**: User has NOT yet tested
+- **GitHub push**: ✅ Up to date at `https://github.com/troycherry-lang/studio-x`
+- **Browser UI**: Ready at `http://127.0.0.1:7875` (auto-opened by `studiopro.bat`)
 
 ## Environment
-- Windows 10, Git Bash
+- Windows 10
 - RTX 5080 (16GB VRAM), PyTorch 2.11.0 + CUDA 12.8
 - Python 3.10.6 at `C:\Program Files\Python310\python.exe`
-- Node/npm v11.9.0 at `C:\Program Files\nodejs\npm.cmd`
-- Repo: `troycherry-lang/studio-pro`
+- Node/npm available for frontend builds
+- Repo: `troycherry-lang/studio-x` (note: repo name; project folder is `StudioPro-v3`)
 
 ## What Works
 - ComfyUI setup with Juggernaut XL, IP-Adapter, OpenPoseXL ControlNet, CLIP Vision
@@ -28,14 +27,15 @@
 - **Multiple LoRA slots** (up to 3) with per-slot strength
 - **Hi-Res Fix / latent upscale** toggle (Off / 1.5x / 2.0x) on all tasks
 - **Generation history / gallery** with metadata (saved to `history/`)
+- **Body Type Presets**: Default, Glamour, Athletic, Voluptuous, Slender, Petite, Muscular, Natural, Mature
+- **Prompt Emphasis** weight slider (0.5x – 2.0x)
+- **Flux support** (disabled by default until models are downloaded)
 
 ## Active Issues
 | Issue | Detail | Action Needed |
 |-------|--------|---------------|
-| Git push failed | node_modules committed, rejected by GitHub | Add `.gitignore`, unstage node_modules, re-push |
-| Port 7869 stuck | Old `studio-x` backend still occupies 7869 | Kill PID or reboot; using 7875 instead |
-| Browser untested | User hasn't opened `http://127.0.0.1:7875` | Ask user to test |
 | 5 tasks untested | Face/Pose/Wardrobe/Retouch/Refine not verified | Test after user confirms Create works |
+| Flux disabled | `FLUX_ENABLED = False` until flux1-dev.safetensors is placed in `ComfyUI\models\unet\` | Download Flux models to enable |
 
 ## Folder Layout (only these matter)
 ```
@@ -51,7 +51,10 @@ C:\Users\troyc\Documents\kimi\workspace\
     │   ├── src/
     │   │   └── App.tsx
     │   └── dist/         # Built output (served by backend)
-    └── studiopro.bat     # One launcher (starts ComfyUI + backend)
+    ├── logs\             # ComfyUI + backend logs
+    ├── studiopro.bat     # Console launcher (auto-opens browser)
+    ├── studiopro-desktop.bat  # Desktop window launcher (pywebview)
+    └── studiopro-open.bat     # Open browser only
 ```
 
 ## Delete These (old builds)
@@ -62,22 +65,23 @@ C:\Users\troyc\Documents\kimi\workspace\
 
 ## To Test
 1. Double-click `StudioPro-v3\studiopro.bat`
-2. Wait for "ComfyUI running" + "Studio Pro backend running" messages
-3. Open browser to `http://127.0.0.1:7875`
-4. Enter prompt, click **Create**
-5. Verify image appears in the gallery below
+2. Wait for the console to show "Studio Pro is ready."
+3. Browser opens automatically to `http://127.0.0.1:7875`
+4. Enter prompt, pick a **Body Type Preset** (e.g., "Glamour" or "Slender"), click **Generate**
+5. Verify image appears in the preview + history gallery
 
 ## Key Code Decisions
 - **Port 7875** (not 7869) – avoids stuck old process
-- **Direct REST client** to ComfyUI – no adapter layers, no drift
+- **Direct REST + WebSocket client** to ComfyUI – real progress + error capture
 - **Backend serves static assets FIRST** (`/assets` mount before SPA catch-all)
 - **Anatomy keywords auto-detect**: `full body`, `head to toe`, `nude`, `breasts`, etc. → injects full-body prompts
 - **Square ratio default** (1024×1024) – prevents portrait cropping above knees
+- **ComfyUI runs inside its own venv** – avoids missing dependencies / silent hangs
 
 ## Next Steps (in order)
-1. Add `.gitignore` to `StudioPro-v3/`, unstage `node_modules/`, push to GitHub
-2. User tests browser UI on port 7875 — verify progress bar, re-run, LoRAs, Hi-Res Fix, history
-3. Verify all 6 tasks work end-to-end
-4. Download recommended models (RealVisXL V4.0, Reliberate XL v3) and LoRAs (Detail Tweaker, epiCRealism helper) into ComfyUI folders
+1. User tests browser UI on port 7875 — verify progress bar, re-run, LoRAs, Hi-Res Fix, history, body presets
+2. Verify all 6 tasks work end-to-end
+3. Download recommended models (RealVisXL V4.0, Reliberate XL v3) and LoRAs (Detail Tweaker, epiCRealism helper) into ComfyUI folders
+4. Optionally enable Flux by downloading flux1-dev.safetensors, t5xxl_fp16.safetensors, ae.safetensors and setting `FLUX_ENABLED = True`
 5. Fix any issues found
 6. Clean up old folders (`StudioPro/`, `studio-x/`, `studio-x-merge/`)
