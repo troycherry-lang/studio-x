@@ -85,6 +85,7 @@ export default function App() {
   const [lastSession, setLastSession] = useState<any>(null);
   const [history, setHistory] = useState<any[]>([]);
   const [bodyPresets, setBodyPresets] = useState<Record<string, string>>({ default: 'Default (no bias)' });
+  const [modelDescriptions, setModelDescriptions] = useState<Record<string, string>>({});
   const [fluxEnabled, setFluxEnabled] = useState(false);
   const [bodyPreset, setBodyPreset] = useState('default');
   const [weightStrength, setWeightStrength] = useState(1.0);
@@ -100,6 +101,7 @@ export default function App() {
     fetch(`${API}/api/health`).then(r => r.json()).then(d => setBackendReady(d.comfyui)).catch(() => setBackendReady(false));
     fetch(`${API}/api/config`).then(r => r.json()).then(d => {
       if (d.body_presets) setBodyPresets(d.body_presets);
+      if (d.model_descriptions) setModelDescriptions(d.model_descriptions);
       if (d.flux_enabled) setFluxEnabled(true);
     }).catch(() => {});
     fetch(`${API}/api/models`).then(r => r.json()).then(d => { if (Array.isArray(d) && d.length) setModels(d); }).catch(() => {});
@@ -373,6 +375,9 @@ export default function App() {
             <select value={model} onChange={e => setModel(e.target.value)}>
               {models.map(m => <option key={m} value={m}>{m.replace('.safetensors', '').replace('flux:', '[Flux] ')}</option>)}
             </select>
+            {modelDescriptions[model] && (
+              <div className="model-desc">{modelDescriptions[model]}</div>
+            )}
           </div>
 
           {/* Flux Toggle */}

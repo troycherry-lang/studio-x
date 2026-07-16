@@ -165,3 +165,6 @@ label.check input { width: 16px; height: 16px; accent-color: var(--accent); }
 .flux-panel { border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg3); padding: 14px; margin-bottom: 16px; }
 .flux-check { font-size: 14px; color: var(--text); }
 .flux-guidance { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+
+/* Model description */
+.model-desc { font-size: 11px; color: var(--text3); margin-top: 6px; font-style: italic; }

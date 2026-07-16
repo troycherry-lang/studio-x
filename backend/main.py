@@ -13,7 +13,7 @@ from config import (
     HOST, PORT, UPLOAD_DIR, OUTPUT_DIR, COMFYUI_DIR, LORA_DIR,
     DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG,
     DEFAULT_LORA_STRENGTH, DEFAULT_UPSCALE, SUPPORTED_UPSCALES, HISTORY_DIR,
-    BODY_PRESETS, FLUX_ENABLED,
+    BODY_PRESETS, FLUX_ENABLED, MODEL_DESCRIPTIONS,
 )
 from comfy_client import comfy
 from workflows import build
@@ -89,6 +89,7 @@ def get_config():
     """Return app configuration for the frontend."""
     return {
         "body_presets": {k: v["label"] for k, v in BODY_PRESETS.items()},
+        "model_descriptions": MODEL_DESCRIPTIONS,
         "flux_enabled": FLUX_ENABLED,
         "default_cfg": DEFAULT_CFG,
         "default_steps": DEFAULT_STEPS,
