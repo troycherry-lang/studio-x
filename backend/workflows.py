@@ -2,7 +2,7 @@
 # Builds ComfyUI JSON node graphs for each task.
 
 import random
-from config import DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG, DEFAULT_LORA_STRENGTH, DEFAULT_NEGATIVE, PORTRAIT_KEYWORDS, BODY_KEYWORDS, BODY_POSITIVE, BODY_NEGATIVE
+from config import DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG, DEFAULT_LORA_STRENGTH, DEFAULT_UPSCALE, DEFAULT_NEGATIVE, PORTRAIT_KEYWORDS, BODY_KEYWORDS, BODY_POSITIVE, BODY_NEGATIVE
 
 class Builder:
     def __init__(self):
@@ -21,7 +21,7 @@ class Builder:
     def _prompt(self, task, user_text, anatomy=False):
         user_lower = user_text.lower()
         is_portrait = any(kw in user_lower for kw in PORTRAIT_KEYWORDS)
-        
+
         # Build prompt with full body FIRST (highest CLIP weight)
         if is_portrait:
             parts = ["professional photograph, high quality, detailed, realistic lighting"]
@@ -44,30 +44,49 @@ class Builder:
             parts.append(custom_negative)
         return ", ".join(parts)
 
-    def _checkpoint(self, model, lora=None, lora_strength=DEFAULT_LORA_STRENGTH):
-        """Load checkpoint, optionally apply LoRA. Returns (ckpt_node, model_clip_node)."""
+    def _checkpoint(self, model, loras=None):
+        """Load checkpoint and stack LoRAs. Returns (ckpt_node, model_clip_node)."""
         ckpt = self._node("CheckpointLoaderSimple", {"ckpt_name": model})
-        if lora and lora not in ("None", "", None):
+        current = ckpt
+        loras = loras or []
+        for entry in loras:
+            name = entry.get("name") if isinstance(entry, dict) else entry
+            strength = entry.get("strength", DEFAULT_LORA_STRENGTH) if isinstance(entry, dict) else DEFAULT_LORA_STRENGTH
+            if not name or name in ("None", "", None):
+                continue
             lora_node = self._node("LoraLoader", {
-                "model": [ckpt, 0],
-                "clip": [ckpt, 1],
-                "lora_name": lora,
-                "strength_model": lora_strength,
-                "strength_clip": lora_strength,
+                "model": [current, 0],
+                "clip": [current, 1],
+                "lora_name": name,
+                "strength_model": strength,
+                "strength_clip": strength,
             })
-            return ckpt, lora_node
-        return ckpt, ckpt
+            current = lora_node
+        return ckpt, current
+
+    def _latent(self, width, height, upscale=DEFAULT_UPSCALE):
+        """Create empty latent at target size, optionally upscaled."""
+        latent = self._node("EmptyLatentImage", {"width": width, "height": height, "batch_size": 1})
+        if upscale and upscale > 1.0:
+            latent = self._node("LatentUpscale", {
+                "samples": [latent, 0],
+                "upscale_method": "nearest-exact",
+                "width": int(width * upscale),
+                "height": int(height * upscale),
+                "crop": "disabled",
+            })
+        return latent
 
     # ── Task: Create (text-to-image) ─────────────────────────────────
-    def create(self, prompt, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, negative_prompt=None):
+    def create(self, prompt, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, loras=None, upscale=DEFAULT_UPSCALE, negative_prompt=None):
         self.nodes = {}
         self.id_counter = 0
         if seed == -1: seed = random.randint(0, 2**32 - 1)
 
-        ckpt, mdl = self._checkpoint(model, lora, lora_strength)
+        ckpt, mdl = self._checkpoint(model, loras)
         pos = self._node("CLIPTextEncode", {"text": self._prompt("create", prompt, anatomy), "clip": [mdl, 1]})
         neg = self._node("CLIPTextEncode", {"text": self._negative(prompt, anatomy, negative_prompt), "clip": [mdl, 1]})
-        latent = self._node("EmptyLatentImage", {"width": width, "height": height, "batch_size": 1})
+        latent = self._latent(width, height, upscale)
         sampler = self._node("KSampler", {
             "model": [mdl, 0], "positive": [pos, 0], "negative": [neg, 0], "latent_image": [latent, 0],
             "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler_ancestral", "scheduler": "normal", "denoise": 1.0
@@ -77,31 +96,31 @@ class Builder:
         return self.nodes
 
     # ── Task: Face (IP-Adapter portrait) ────────────────────────────
-    def face(self, prompt, ref_image, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, negative_prompt=None):
+    def face(self, prompt, ref_image, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, loras=None, upscale=DEFAULT_UPSCALE, negative_prompt=None):
         self.nodes = {}
         self.id_counter = 0
         if seed == -1: seed = random.randint(0, 2**32 - 1)
 
-        ckpt, mdl = self._checkpoint(model, lora, lora_strength)
+        ckpt, mdl = self._checkpoint(model, loras)
         img = self._node("LoadImage", {"image": ref_image})
         ip = self._node("IPAdapterUnifiedLoader", {"model": [mdl, 0], "preset": "PLUS FACE (portraits)"})
         ipa = self._node("IPAdapter", {"model": [ip, 0], "ipadapter": [ip, 1], "image": [img, 0], "weight": 0.8, "start_at": 0.0, "end_at": 1.0, "weight_type": "standard"})
 
         pos = self._node("CLIPTextEncode", {"text": self._prompt("face", prompt, anatomy), "clip": [mdl, 1]})
         neg = self._node("CLIPTextEncode", {"text": self._negative(prompt, anatomy, negative_prompt), "clip": [mdl, 1]})
-        latent = self._node("EmptyLatentImage", {"width": width, "height": height, "batch_size": 1})
+        latent = self._latent(width, height, upscale)
         sampler = self._node("KSampler", {"model": [ipa, 0], "positive": [pos, 0], "negative": [neg, 0], "latent_image": [latent, 0], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler_ancestral", "scheduler": "normal", "denoise": 1.0})
         vae = self._node("VAEDecode", {"samples": [sampler, 0], "vae": [ckpt, 2]})
         self._node("SaveImage", {"images": [vae, 0], "filename_prefix": "studiopro_face"})
         return self.nodes
 
     # ── Task: Pose (OpenPose + IP-Adapter) ───────────────────────────
-    def pose(self, prompt, person_img, pose_img, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, negative_prompt=None):
+    def pose(self, prompt, person_img, pose_img, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, loras=None, upscale=DEFAULT_UPSCALE, negative_prompt=None):
         self.nodes = {}
         self.id_counter = 0
         if seed == -1: seed = random.randint(0, 2**32 - 1)
 
-        ckpt, mdl = self._checkpoint(model, lora, lora_strength)
+        ckpt, mdl = self._checkpoint(model, loras)
         person = self._node("LoadImage", {"image": person_img})
         pose = self._node("LoadImage", {"image": pose_img})
 
@@ -116,19 +135,19 @@ class Builder:
         neg = self._node("CLIPTextEncode", {"text": self._negative(prompt, anatomy, negative_prompt), "clip": [mdl, 1]})
         self.nodes[cna]["inputs"]["conditioning"] = [pos, 0]
 
-        latent = self._node("EmptyLatentImage", {"width": width, "height": height, "batch_size": 1})
+        latent = self._latent(width, height, upscale)
         sampler = self._node("KSampler", {"model": [ipa, 0], "positive": [cna, 0], "negative": [neg, 0], "latent_image": [latent, 0], "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler_ancestral", "scheduler": "normal", "denoise": 1.0})
         vae = self._node("VAEDecode", {"samples": [sampler, 0], "vae": [ckpt, 2]})
         self._node("SaveImage", {"images": [vae, 0], "filename_prefix": "studiopro_pose"})
         return self.nodes
 
     # ── Task: Inpaint (Wardrobe / Retouch) ───────────────────────────
-    def inpaint(self, prompt, image, mask, task="wardrobe", width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, denoise=0.75, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, negative_prompt=None):
+    def inpaint(self, prompt, image, mask, task="wardrobe", width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, denoise=0.75, anatomy=False, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, loras=None, upscale=DEFAULT_UPSCALE, negative_prompt=None):
         self.nodes = {}
         self.id_counter = 0
         if seed == -1: seed = random.randint(0, 2**32 - 1)
 
-        ckpt, mdl = self._checkpoint(model, lora, lora_strength)
+        ckpt, mdl = self._checkpoint(model, loras)
         img = self._node("LoadImage", {"image": image})
         msk = self._node("LoadImage", {"image": mask})
 
@@ -143,12 +162,12 @@ class Builder:
         return self.nodes
 
     # ── Task: Refine (img2img / upscale) ────────────────────────────
-    def refine(self, image, prompt="", denoise=0.5, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, upscale=None, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, negative_prompt=None):
+    def refine(self, image, prompt="", denoise=0.5, width=DEFAULT_WIDTH, height=DEFAULT_HEIGHT, steps=DEFAULT_STEPS, cfg=DEFAULT_CFG, seed=-1, model=DEFAULT_MODEL, lora=None, lora_strength=DEFAULT_LORA_STRENGTH, loras=None, upscale=DEFAULT_UPSCALE, negative_prompt=None):
         self.nodes = {}
         self.id_counter = 0
         if seed == -1: seed = random.randint(0, 2**32 - 1)
 
-        ckpt, mdl = self._checkpoint(model, lora, lora_strength)
+        ckpt, mdl = self._checkpoint(model, loras)
         img = self._node("LoadImage", {"image": image})
 
         vae_in = self._node("VAEEncode", {"pixels": [img, 0], "vae": [ckpt, 2]})
@@ -159,7 +178,7 @@ class Builder:
             latent = [up, 0]
 
         pos = self._node("CLIPTextEncode", {"text": prompt or "high quality, detailed", "clip": [mdl, 1]})
-        neg = self._node("CLIPTextEncode", {"text": DEFAULT_NEGATIVE + (negative_prompt ? ", " + negative_prompt : ""), "clip": [mdl, 1]})
+        neg = self._node("CLIPTextEncode", {"text": DEFAULT_NEGATIVE + ((", " + negative_prompt) if negative_prompt else ""), "clip": [mdl, 1]})
 
         sampler = self._node("KSampler", {"model": [mdl, 0], "positive": [pos, 0], "negative": [neg, 0], "latent_image": latent, "seed": seed, "steps": steps, "cfg": cfg, "sampler_name": "euler_ancestral", "scheduler": "normal", "denoise": denoise})
         vae = self._node("VAEDecode", {"samples": [sampler, 0], "vae": [ckpt, 2]})

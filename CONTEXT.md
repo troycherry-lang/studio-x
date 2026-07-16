@@ -21,6 +21,13 @@
 - 6 tasks implemented: Create, Face, Pose, Wardrobe, Retouch, Refine
 - Auto-detects body keywords → injects full-body anti-crop prompts
 - Default square ratio (1024×1024) to avoid knee-cropping
+- **Real-time progress tracking** via ComfyUI WebSocket (percentage + stage)
+- **Human-readable error mapping** (OOM, timeout, connection, model missing)
+- **1-click re-run last session** saved to browser localStorage
+- **Upload image previews** (thumbnails before generation)
+- **Multiple LoRA slots** (up to 3) with per-slot strength
+- **Hi-Res Fix / latent upscale** toggle (Off / 1.5x / 2.0x) on all tasks
+- **Generation history / gallery** with metadata (saved to `history/`)
 
 ## Active Issues
 | Issue | Detail | Action Needed |
@@ -69,7 +76,8 @@ C:\Users\troyc\Documents\kimi\workspace\
 
 ## Next Steps (in order)
 1. Add `.gitignore` to `StudioPro-v3/`, unstage `node_modules/`, push to GitHub
-2. User tests browser UI on port 7875
+2. User tests browser UI on port 7875 — verify progress bar, re-run, LoRAs, Hi-Res Fix, history
 3. Verify all 6 tasks work end-to-end
-4. Fix any issues found
-5. Clean up old folders (`StudioPro/`, `studio-x/`, `studio-x-merge/`)
+4. Download recommended models (RealVisXL V4.0, Reliberate XL v3) and LoRAs (Detail Tweaker, epiCRealism helper) into ComfyUI folders
+5. Fix any issues found
+6. Clean up old folders (`StudioPro/`, `studio-x/`, `studio-x-merge/`)

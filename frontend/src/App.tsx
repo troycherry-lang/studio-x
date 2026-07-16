@@ -22,6 +22,12 @@ const RATIOS = [
   { label: '4:3', w: 1344, h: 1024, hint: 'Landscape' },
 ];
 
+const UPSCALES = [
+  { label: 'Off', value: 1.0 },
+  { label: '1.5x', value: 1.5 },
+  { label: '2.0x', value: 2.0 },
+];
+
 const BODY_FEATURES = [
   { id: 'large_areolas', label: 'Large areolas', pos: 'large areolas, prominent nipples, natural nipple detail', neg: 'small areolas, tiny nipples' },
   { id: 'sagging', label: 'Natural sagging', pos: 'sagging natural breasts, breast ptosis, soft pendulous tissue, gravity-affected', neg: 'perky, lifted, firm, silicone, implants' },
@@ -31,6 +37,17 @@ const BODY_FEATURES = [
   { id: 'stretch_marks', label: 'Stretch marks', pos: 'stretch marks on skin, natural skin texture, lived-in body', neg: 'flawless skin, perfect smooth skin, no blemishes' },
 ];
 
+const SESSION_KEY = 'studiopro_last_session';
+
+function getStageText(progress: number, status: string) {
+  if (status === 'error') return 'Failed';
+  if (progress < 5) return 'Submitting...';
+  if (progress < 15) return 'Loading model...';
+  if (progress < 85) return `Generating... ${progress}%`;
+  if (progress < 100) return 'Finalizing...';
+  return 'Done';
+}
+
 export default function App() {
   const [task, setTask] = useState('create');
   const [prompt, setPrompt] = useState('');
@@ -39,34 +56,54 @@ export default function App() {
   const [steps, setSteps] = useState(25);
   const [cfg, setCfg] = useState(7);
   const [seed, setSeed] = useState(-1);
+  const seedRef = useRef(seed);
+  useEffect(() => { seedRef.current = seed; }, [seed]);
   const [anatomy, setAnatomy] = useState(false);
   const [realism, setRealism] = useState(false);
-  const [features, setFeatures] = useState({});
+  const [features, setFeatures] = useState<Record<string, boolean>>({});
   const [model, setModel] = useState('juggernautXL_v8Rundiffusion.safetensors');
-  const [models, setModels] = useState([]);
-  const [loras, setLoras] = useState([]);
-  const [lora, setLora] = useState('None');
-  const [loraStrength, setLoraStrength] = useState(1.0);
+  const [models, setModels] = useState<string[]>([]);
+  const [loras, setLoras] = useState<string[]>([]);
+  const [loraSlots, setLoraSlots] = useState<{ name: string; strength: number }[]>([
+    { name: 'None', strength: 1.0 },
+    { name: 'None', strength: 1.0 },
+    { name: 'None', strength: 1.0 },
+  ]);
+  const [upscale, setUpscale] = useState(1.0);
   const [refImage, setRefImage] = useState('');
+  const [refPreview, setRefPreview] = useState('');
   const [poseImage, setPoseImage] = useState('');
+  const [posePreview, setPosePreview] = useState('');
   const [maskImage, setMaskImage] = useState('');
+  const [maskPreview, setMaskPreview] = useState('');
   const [generating, setGenerating] = useState(false);
   const [progress, setProgress] = useState(0);
   const [status, setStatus] = useState('Ready');
   const [resultUrl, setResultUrl] = useState('');
+  const [resultMeta, setResultMeta] = useState<any>(null);
   const [backendReady, setBackendReady] = useState(false);
-  const pollRef = useRef(null);
+  const [lastSession, setLastSession] = useState<any>(null);
+  const [history, setHistory] = useState<any[]>([]);
+  const pollRef = useRef<number | null>(null);
 
   const PORTRAIT_KEYWORDS = ['close up', 'close-up', 'portrait', 'headshot', 'face only', 'upper body', 'bust', 'torso', 'waist up', 'chest up', 'shoulders up', 'head and shoulders', 'profile', 'selfie'];
   const isPortrait = PORTRAIT_KEYWORDS.some(kw => prompt.toLowerCase().includes(kw));
 
   useEffect(() => {
     fetch(`${API}/api/health`).then(r => r.json()).then(d => setBackendReady(d.comfyui)).catch(() => setBackendReady(false));
-    fetch(`${API}/api/models`).then(r => r.json()).then(d => { if (d.length) setModels(d); }).catch(() => {});
+    fetch(`${API}/api/models`).then(r => r.json()).then(d => { if (Array.isArray(d) && d.length) setModels(d); }).catch(() => {});
     fetch(`${API}/api/loras`).then(r => r.json()).then(d => setLoras(d || [])).catch(() => setLoras([]));
+    loadHistory();
+
+    const saved = localStorage.getItem(SESSION_KEY);
+    if (saved) {
+      try {
+        setLastSession(JSON.parse(saved));
+      } catch {}
+    }
   }, []);
 
-  const toggleFeature = (id) => {
+  const toggleFeature = (id: string) => {
     setFeatures(prev => ({ ...prev, [id]: !prev[id] }));
   };
 
@@ -90,16 +127,56 @@ export default function App() {
     return { positive, negative };
   };
 
-  const needsRef = task !== 'create';
-  const needsPose = task === 'pose';
-  const needsMask = task === 'wardrobe' || task === 'retouch';
+  const activeLoras = () => loraSlots.filter(s => s.name && s.name !== 'None');
 
-  const upload = async (file, setter) => {
+  const loadHistory = async () => {
+    try {
+      const r = await fetch(`${API}/api/history`);
+      const d = await r.json();
+      setHistory(d.history || []);
+    } catch {}
+  };
+
+  const upload = async (file: File, setter: (name: string) => void, previewSetter: (url: string) => void) => {
+    previewSetter(URL.createObjectURL(file));
     const f = new FormData();
     f.append('file', file);
     const r = await fetch(`${API}/api/upload`, { method: 'POST', body: f });
     const d = await r.json();
     setter(d.filename);
+  };
+
+  const saveSession = () => {
+    const session = {
+      task, prompt, width, height, steps, cfg, seed, anatomy, realism, features, model,
+      loraSlots, upscale, refImage, poseImage, maskImage,
+    };
+    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    setLastSession(session);
+  };
+
+  const restoreSession = () => {
+    if (!lastSession) return;
+    setTask(lastSession.task || 'create');
+    setPrompt(lastSession.prompt || '');
+    setWidth(lastSession.width || 1024);
+    setHeight(lastSession.height || 1024);
+    setSteps(lastSession.steps || 25);
+    setCfg(lastSession.cfg || 7);
+    setSeed(lastSession.seed ?? -1);
+    setAnatomy(lastSession.anatomy || false);
+    setRealism(lastSession.realism || false);
+    setFeatures(lastSession.features || {});
+    setModel(lastSession.model || model);
+    if (lastSession.loraSlots) setLoraSlots(lastSession.loraSlots);
+    setUpscale(lastSession.upscale ?? 1.0);
+    setRefImage(lastSession.refImage || '');
+    setPoseImage(lastSession.poseImage || '');
+    setMaskImage(lastSession.maskImage || '');
+    // Previews can't be restored from filenames alone; clear them
+    setRefPreview('');
+    setPosePreview('');
+    setMaskPreview('');
   };
 
   const generate = async () => {
@@ -114,6 +191,7 @@ export default function App() {
     setGenerating(true);
     setProgress(0);
     setResultUrl('');
+    setResultMeta(null);
     setStatus('Submitting...');
 
     const f = new FormData();
@@ -124,13 +202,14 @@ export default function App() {
     f.append('height', String(height));
     f.append('steps', String(steps));
     f.append('cfg', String(effectiveCfg));
-    f.append('seed', String(seed));
+    f.append('seed', String(seedRef.current));
     f.append('model', model);
     f.append('anatomy', String(anatomy));
-    if (lora && lora !== 'None') {
-      f.append('lora', lora);
-      f.append('lora_strength', String(loraStrength));
-    }
+    f.append('upscale', String(upscale));
+
+    const lorasJson = JSON.stringify(activeLoras());
+    f.append('loras', lorasJson);
+
     if (refImage) f.append('reference_image', refImage);
     if (poseImage) f.append('pose_image', poseImage);
     if (maskImage) f.append('mask_image', maskImage);
@@ -141,32 +220,38 @@ export default function App() {
       if (!r.ok) throw new Error(d.detail || 'Failed');
       const jobId = d.job_id;
       setStatus('Generating...');
+      saveSession();
 
-      pollRef.current = setInterval(async () => {
+      pollRef.current = window.setInterval(async () => {
         const pr = await fetch(`${API}/api/progress/${jobId}`);
         const pd = await pr.json();
+        const pct = Math.round(pd.progress) || 0;
+        setProgress(pct);
+        setStatus(getStageText(pct, pd.status));
+
         if (pd.status === 'completed') {
-          setProgress(100);
-          setStatus('Done');
-          clearInterval(pollRef.current);
+          clearInterval(pollRef.current!);
           const rr = await fetch(`${API}/api/result/${jobId}`);
           const blob = await rr.blob();
           setResultUrl(URL.createObjectURL(blob));
+          setResultMeta({ task, prompt, seed: seedRef.current === -1 ? 'random' : seedRef.current, upscale, model, cfg: effectiveCfg });
           setGenerating(false);
-        } else if (pd.error) {
-          setStatus('Error: ' + pd.error);
-          clearInterval(pollRef.current);
+          loadHistory();
+        } else if (pd.status === 'error') {
+          clearInterval(pollRef.current!);
+          setStatus('Error: ' + (pd.error || 'Generation failed'));
           setGenerating(false);
-        } else {
-          setProgress(Math.round((pd.progress / 100) * 100) || 5);
-          setStatus('Generating...');
         }
-      }, 1500);
-    } catch (e) {
+      }, 1200);
+    } catch (e: any) {
       setStatus('Error: ' + e.message);
       setGenerating(false);
     }
   };
+
+  const needsRef = task !== 'create';
+  const needsPose = task === 'pose';
+  const needsMask = task === 'wardrobe' || task === 'retouch';
 
   return (
     <div className="app">
@@ -197,15 +282,23 @@ export default function App() {
               <span>{t.icon}</span><div><b>{t.name}</b><small>{t.desc}</small></div>
             </button>
           ))}
+
+          {lastSession && (
+            <div className="session-restore">
+              <button className="rerun-btn" onClick={restoreSession}>
+                🔄 Re-run last session
+              </button>
+            </div>
+          )}
         </nav>
 
         <main className="editor">
           <h2>{TASKS.find(t => t.id === task)?.name}</h2>
           <p className="sub">{TASKS.find(t => t.id === task)?.desc}</p>
 
-          {needsRef && <DropZone label="Reference Image" onFile={f => upload(f, setRefImage)} name={refImage} />}
-          {needsPose && <DropZone label="Pose Reference" onFile={f => upload(f, setPoseImage)} name={poseImage} />}
-          {needsMask && <DropZone label="Mask (white = edit area)" onFile={f => upload(f, setMaskImage)} name={maskImage} />}
+          {needsRef && <DropZone label="Reference Image" preview={refPreview} onFile={f => upload(f, setRefImage, setRefPreview)} name={refImage} />}
+          {needsPose && <DropZone label="Pose Reference" preview={posePreview} onFile={f => upload(f, setPoseImage, setPosePreview)} name={poseImage} />}
+          {needsMask && <DropZone label="Mask (white = edit area)" preview={maskPreview} onFile={f => upload(f, setMaskImage, setMaskPreview)} name={maskImage} />}
 
           <div className="field">
             <label>Description</label>
@@ -226,21 +319,31 @@ export default function App() {
           </div>
 
           {loras.length > 0 && (
-            <>
-              <div className="field">
-                <label>LoRA</label>
-                <select value={lora} onChange={e => setLora(e.target.value)}>
-                  <option value="None">None</option>
-                  {loras.map(l => <option key={l} value={l}>{l.replace('.safetensors', '')}</option>)}
-                </select>
-              </div>
-              {lora !== 'None' && (
-                <div className="field row">
-                  <label>LoRA Strength: {loraStrength.toFixed(1)}</label>
-                  <input type="range" min={0.1} max={2.0} step={0.1} value={loraStrength} onChange={e => setLoraStrength(Number(e.target.value))} />
+            <div className="field">
+              <label>LoRAs <small>(up to 3)</small></label>
+              {loraSlots.map((slot, idx) => (
+                <div key={idx} className="lora-slot">
+                  <select value={slot.name} onChange={e => {
+                    const next = [...loraSlots];
+                    next[idx].name = e.target.value;
+                    setLoraSlots(next);
+                  }}>
+                    <option value="None">None</option>
+                    {loras.map(l => <option key={l} value={l}>{l.replace('.safetensors', '')}</option>)}
+                  </select>
+                  {slot.name !== 'None' && (
+                    <div className="lora-strength">
+                      <span>Strength: {slot.strength.toFixed(1)}</span>
+                      <input type="range" min={0.1} max={1.5} step={0.1} value={slot.strength} onChange={e => {
+                        const next = [...loraSlots];
+                        next[idx].strength = Number(e.target.value);
+                        setLoraSlots(next);
+                      }} />
+                    </div>
+                  )}
                 </div>
-              )}
-            </>
+              ))}
+            </div>
           )}
 
           <div className="field">
@@ -249,6 +352,17 @@ export default function App() {
               {RATIOS.map(r => (
                 <button key={r.label} className={width === r.w && height === r.h ? 'active' : ''} onClick={() => { setWidth(r.w); setHeight(r.h); }} title={`${r.w}x${r.h}${r.hint ? ' - ' + r.hint : ''}`}>
                   {r.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="field">
+            <label>Hi-Res Fix</label>
+            <div className="ratios">
+              {UPSCALES.map(u => (
+                <button key={u.label} className={upscale === u.value ? 'active' : ''} onClick={() => setUpscale(u.value)}>
+                  {u.label}
                 </button>
               ))}
             </div>
@@ -298,7 +412,7 @@ export default function App() {
           </div>
 
           <button className="generate" onClick={generate} disabled={generating || !backendReady}>
-            {generating ? 'Generating...' : '✨ Generate'}
+            {generating ? status : '✨ Generate'}
           </button>
         </main>
 
@@ -316,8 +430,33 @@ export default function App() {
           </div>
           {resultUrl && (
             <div className="actions">
-              <button onClick={() => { setRefImage(''); setResultUrl(''); setTask('refine'); }}>Refine</button>
+              <button onClick={() => { setRefImage(''); setRefPreview(''); setResultUrl(''); setTask('refine'); }}>Refine</button>
+              <button onClick={() => { const newSeed = Math.floor(Math.random() * 2**32); setSeed(newSeed); seedRef.current = newSeed; generate(); }}>Re-roll</button>
               <button onClick={() => { const a = document.createElement('a'); a.href = resultUrl; a.download = `studiopro_${Date.now()}.png`; a.click(); }}>Save</button>
+            </div>
+          )}
+          {resultMeta && (
+            <div className="meta">
+              <div>Seed: {resultMeta.seed}</div>
+              <div>Model: {resultMeta.model.replace('.safetensors', '')}</div>
+              <div>Hi-Res: {resultMeta.upscale > 1 ? resultMeta.upscale + 'x' : 'Off'}</div>
+              <div>CFG: {resultMeta.cfg}</div>
+            </div>
+          )}
+
+          {history.length > 0 && (
+            <div className="history">
+              <h4>Recent</h4>
+              <div className="history-grid">
+                {history.map(h => (
+                  <button key={h.id} className="history-thumb" onClick={() => {
+                    setResultUrl(`${API}/api/history/${h.id}/image?date=${h.image.split('/')[0]}`);
+                    setResultMeta(h);
+                  }}>
+                    <img src={`${API}/api/history/${h.id}/image?date=${h.image.split('/')[0]}`} alt="" />
+                  </button>
+                ))}
+              </div>
             </div>
           )}
         </aside>
@@ -326,12 +465,18 @@ export default function App() {
   );
 }
 
-function DropZone({ label, onFile, name }) {
-  const inputRef = useRef(null);
+function DropZone({ label, onFile, name, preview }: { label: string, onFile: (f: File) => void, name: string, preview?: string }) {
+  const inputRef = useRef<HTMLInputElement>(null);
   return (
     <div className="dropzone" onClick={() => inputRef.current?.click()}>
       <input ref={inputRef} type="file" accept="image/*" hidden onChange={e => e.target.files?.[0] && onFile(e.target.files[0])} />
-      {!name ? <><span>📷</span><div>{label}<small>Click or drop</small></div></> : <span>{name}</span>}
+      {preview ? (
+        <img src={preview} alt={label} className="dropzone-preview" />
+      ) : !name ? (
+        <><span>📷</span><div>{label}<small>Click or drop</small></div></>
+      ) : (
+        <span>{name}</span>
+      )}
     </div>
   );
 }

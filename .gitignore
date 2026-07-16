@@ -54,9 +54,10 @@ frontend/dist/**/*
 .DS_Store
 Thumbs.db
 
-# Uploads and outputs
+# Uploads, outputs, and history
 uploads/
 outputs/
+history/
 *.png
 *.jpg
 *.jpeg

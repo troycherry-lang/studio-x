@@ -11,7 +11,12 @@ import urllib.request
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.join(BASE_DIR, "backend")
 COMFYUI_DIR = os.path.join(os.path.dirname(BASE_DIR), "ComfyUI")
+COMFYUI_VENV_PYTHON = os.path.join(COMFYUI_DIR, "venv", "Scripts", "python.exe")
 PYTHON = sys.executable
+
+# ComfyUI must run inside its own venv, otherwise it silently fails/hangs.
+COMFYUI_PYTHON = COMFYUI_VENV_PYTHON if os.path.exists(COMFYUI_VENV_PYTHON) else PYTHON
+
 
 procs = []
 
@@ -45,7 +50,8 @@ def is_ready(port, path="/api/health"):
         return False
 
 def start(cmd, cwd, wait_for, max_wait=60):
-    p = subprocess.Popen(cmd, cwd=cwd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # Inherit stdout/stderr so the user sees startup output and errors in real time.
+    p = subprocess.Popen(cmd, cwd=cwd)
     procs.append(p)
     for i in range(max_wait):
         time.sleep(1)
@@ -65,7 +71,7 @@ kill(7875, "backend")
 # 2. Start ComfyUI
 if not is_ready(8188, "/system_stats"):
     print("  [..] Starting ComfyUI...")
-    if start([PYTHON, "main.py", "--listen", "127.0.0.1", "--port", "8188"], COMFYUI_DIR, lambda: is_ready(8188, "/system_stats"), 60):
+    if start([COMFYUI_PYTHON, "main.py", "--listen", "127.0.0.1", "--port", "8188"], COMFYUI_DIR, lambda: is_ready(8188, "/system_stats"), 60):
         print("  [OK] ComfyUI running.")
     else:
         print("  [ERROR] ComfyUI failed to start.")

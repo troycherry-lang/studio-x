@@ -6,13 +6,21 @@ import subprocess
 import sys
 import time
 import os
+import threading
 import webview
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 BACKEND_DIR = os.path.join(BASE_DIR, "backend")
 COMFYUI_DIR = os.path.join(os.path.dirname(BASE_DIR), "ComfyUI")
+COMFYUI_VENV_PYTHON = os.path.join(COMFYUI_DIR, "venv", "Scripts", "python.exe")
 
 PYTHON = sys.executable
+COMFYUI_PYTHON = COMFYUI_VENV_PYTHON if os.path.exists(COMFYUI_VENV_PYTHON) else PYTHON
+
+LOG_DIR = os.path.join(BASE_DIR, "logs")
+os.makedirs(LOG_DIR, exist_ok=True)
+COMFYUI_LOG = os.path.join(LOG_DIR, "comfyui.log")
+BACKEND_LOG = os.path.join(LOG_DIR, "backend.log")
 processes = []
 
 def run_cmd(cmd):
@@ -73,11 +81,12 @@ def start_comfyui():
         print("[OK] ComfyUI already running.")
         return None
     print("[..] Starting ComfyUI...")
+    out = open(COMFYUI_LOG, "w", encoding="utf-8", errors="replace")
     p = subprocess.Popen(
-        [PYTHON, "main.py", "--listen", "127.0.0.1", "--port", "8188"],
+        [COMFYUI_PYTHON, "main.py", "--listen", "127.0.0.1", "--port", "8188"],
         cwd=COMFYUI_DIR,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=out,
+        stderr=subprocess.STDOUT,
     )
     processes.append(p)
     for i in range(60):
@@ -91,11 +100,12 @@ def start_comfyui():
 def start_backend():
     ensure_port_free(7875, "backend")
     print("[..] Starting Studio Pro backend...")
+    out = open(BACKEND_LOG, "w", encoding="utf-8", errors="replace")
     p = subprocess.Popen(
         [PYTHON, "-m", "uvicorn", "main:app", "--host", "127.0.0.1", "--port", "7875", "--log-level", "warning"],
         cwd=BACKEND_DIR,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+        stdout=out,
+        stderr=subprocess.STDOUT,
     )
     processes.append(p)
     for i in range(30):

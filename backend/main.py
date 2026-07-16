@@ -7,9 +7,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from datetime import datetime
-import json, os, shutil
+import json, os, shutil, re, random, base64
+from datetime import datetime
 
-from config import HOST, PORT, UPLOAD_DIR, OUTPUT_DIR, COMFYUI_DIR, LORA_DIR, DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG, DEFAULT_LORA_STRENGTH
+from config import HOST, PORT, UPLOAD_DIR, OUTPUT_DIR, COMFYUI_DIR, LORA_DIR, DEFAULT_MODEL, DEFAULT_WIDTH, DEFAULT_HEIGHT, DEFAULT_STEPS, DEFAULT_CFG, DEFAULT_LORA_STRENGTH, DEFAULT_UPSCALE, SUPPORTED_UPSCALES, HISTORY_DIR
 from comfy_client import comfy
 from workflows import build
 
@@ -28,6 +29,50 @@ if assets.exists():
 
 # In-memory jobs
 jobs = {}
+
+
+def humanize_error(exc):
+    """Translate common failures into actionable user messages."""
+    text = str(exc).lower()
+    if "out of memory" in text or "cuda" in text and "memory" in text or "oom" in text:
+        return "GPU ran out of memory. Try a smaller image, fewer steps, or no Hi-Res Fix."
+    if "timeout" in text or "timed out" in text:
+        return "Generation timed out. ComfyUI may be busy or stuck. Restart and try again."
+    if "connection" in text or "refused" in text or "unable to connect" in text:
+        return "Cannot reach ComfyUI. Make sure Studio Pro is running and ComfyUI started."
+    if "invalid" in text and ("ratio" in text or "aspect" in text):
+        return "Invalid image size. Pick a supported aspect ratio."
+    if "workflow" in text and "error" in text:
+        return f"Workflow error: {exc}"
+    if "not found" in text and ("model" in text or "checkpoint" in text):
+        return "Selected model was not found in ComfyUI. Check the Models folder."
+    if "no module" in text or "import" in text:
+        return f"ComfyUI is missing a required node or model: {exc}"
+    return f"Generation failed: {exc}"
+
+
+def _parse_loras(raw):
+    """Parse a JSON list of {name, strength} LoRAs from form data."""
+    if not raw:
+        return []
+    if isinstance(raw, list):
+        return raw
+    try:
+        data = json.loads(raw)
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+
+def _clamp_upscale(value):
+    try:
+        f = float(value)
+    except Exception:
+        return DEFAULT_UPSCALE
+    return min(SUPPORTED_UPSCALES, key=lambda x: abs(x - f))
+
 
 # ── Health ───────────────────────────────────────────────────────────
 @app.get("/api/health")
@@ -86,6 +131,8 @@ async def generate(
     anatomy: bool = Form(False),
     lora: str = Form(None),
     lora_strength: float = Form(DEFAULT_LORA_STRENGTH),
+    loras: str = Form("[]"),
+    upscale: float = Form(DEFAULT_UPSCALE),
     reference_image: str = Form(None),
     pose_image: str = Form(None),
     mask_image: str = Form(None),
@@ -94,7 +141,23 @@ async def generate(
     if not comfy.is_ready():
         raise HTTPException(503, "ComfyUI is not running. Start it first.")
 
-    params = {"prompt": prompt, "negative_prompt": negative_prompt, "width": width, "height": height, "steps": steps, "cfg": cfg, "seed": seed, "model": model, "anatomy": anatomy, "lora": lora, "lora_strength": lora_strength}
+    # Build LoRA list: legacy single lora + new multi-lora list
+    lora_list = _parse_loras(loras)
+    if lora and lora not in ("None", "", None) and not any(entry.get("name") == lora for entry in lora_list):
+        lora_list.insert(0, {"name": lora, "strength": lora_strength})
+
+    # Lock in a real seed so the user can reproduce the result
+    if seed == -1:
+        seed = random.randint(0, 2**32 - 1)
+
+    params = {
+        "prompt": prompt, "negative_prompt": negative_prompt,
+        "width": width, "height": height, "steps": steps, "cfg": cfg,
+        "seed": seed, "model": model, "anatomy": anatomy,
+        "lora": lora, "lora_strength": lora_strength,
+        "loras": lora_list,
+        "upscale": _clamp_upscale(upscale),
+    }
 
     if task == "face":
         if not reference_image: raise HTTPException(400, "Need reference_image")
@@ -115,51 +178,68 @@ async def generate(
     try:
         workflow = build(task, params)
     except Exception as e:
-        raise HTTPException(500, f"Workflow error: {e}")
+        raise HTTPException(500, humanize_error(e))
 
     try:
         prompt_id = comfy.queue(workflow)
     except Exception as e:
-        raise HTTPException(500, f"ComfyUI error: {e}")
+        raise HTTPException(503, humanize_error(e))
 
-    jobs[prompt_id] = {"task": task, "status": "queued", "outputs": []}
-    return {"job_id": prompt_id, "status": "queued"}
+    jobs[prompt_id] = {
+        "task": task, "status": "queued", "outputs": [],
+        "meta": {
+            "task": task, "prompt": prompt, "negative_prompt": negative_prompt,
+            "width": width, "height": height, "steps": steps, "cfg": cfg,
+            "seed": seed, "model": model, "anatomy": anatomy,
+            "loras": lora_list, "upscale": params["upscale"],
+        }
+    }
+    return {"job_id": prompt_id, "status": "queued", "seed": seed}
 
 # ── Progress ───────────────────────────────────────────────────────
 @app.get("/api/progress/{job_id}")
 def progress(job_id: str):
     if job_id not in jobs:
-        # Check if already completed in ComfyUI history
-        try:
-            hist = comfy.get_history(job_id)
-            if job_id in hist:
-                return {"job_id": job_id, "status": "completed", "progress": 100, "outputs": []}
-        except: pass
         raise HTTPException(404, "Job not found")
 
-    job = jobs[job_id]
-    if job["status"] == "completed":
-        return {"job_id": job_id, "status": "completed", "progress": 100, "outputs": job["outputs"]}
+    prog = comfy.get_progress(job_id)
+    # Sync our in-memory job record
+    jobs[job_id]["status"] = prog["status"]
+    if prog.get("outputs"):
+        jobs[job_id]["outputs"] = prog["outputs"]
 
-    # Check ComfyUI history
-    try:
-        hist = comfy.get_history(job_id)
-        if job_id in hist:
-            job["status"] = "completed"
-            job["progress"] = 100
-            outs = []
-            for node_id, node_out in hist[job_id].get("outputs", {}).items():
-                for key, val in node_out.items():
-                    if isinstance(val, list):
-                        for item in val:
-                            if isinstance(item, dict) and "filename" in item:
-                                outs.append(item["filename"])
-            job["outputs"] = outs
-            return {"job_id": job_id, "status": "completed", "progress": 100, "outputs": outs}
-    except:
-        pass
+    return {
+        "job_id": job_id,
+        "status": prog["status"],
+        "progress": prog["progress"],
+        "outputs": jobs[job_id].get("outputs", []),
+        "error": prog.get("error"),
+    }
 
-    return {"job_id": job_id, "status": job["status"], "progress": 0, "outputs": []}
+def _save_history(job_id: str, image_data: bytes):
+    """Persist generated image + metadata to the history folder."""
+    job = jobs.get(job_id)
+    if not job or "meta" not in job:
+        return None
+    meta = dict(job["meta"])
+    ts = datetime.now()
+    day_dir = Path(HISTORY_DIR) / ts.strftime("%Y-%m-%d")
+    day_dir.mkdir(parents=True, exist_ok=True)
+    file_id = ts.strftime("%H%M%S") + f"_{job_id[:8]}"
+    img_path = day_dir / f"{file_id}.png"
+    with open(img_path, "wb") as f:
+        f.write(image_data)
+    meta.update({
+        "id": file_id,
+        "job_id": job_id,
+        "created_at": ts.isoformat(),
+        "image": str(img_path.relative_to(Path(HISTORY_DIR))),
+    })
+    json_path = day_dir / f"{file_id}.json"
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(meta, f, indent=2, default=str)
+    return meta
+
 
 # ── Result ──────────────────────────────────────────────────────────
 @app.get("/api/result/{job_id}")
@@ -179,9 +259,57 @@ def result(job_id: str):
         out_path.parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "wb") as f:
             f.write(data)
+        # Persist to history gallery
+        _save_history(job_id, data)
         return StreamingResponse(iter([data]), media_type="image/png")
     except Exception as e:
         raise HTTPException(500, f"Image error: {e}")
+
+
+# ── History / Gallery ───────────────────────────────────────────────
+@app.get("/api/history")
+def list_history(limit: int = 20):
+    """Return recent generations sorted newest first."""
+    entries = []
+    hist_path = Path(HISTORY_DIR)
+    if not hist_path.exists():
+        return {"history": []}
+    for day_dir in sorted(hist_path.iterdir(), reverse=True):
+        if not day_dir.is_dir():
+            continue
+        for json_file in sorted(day_dir.glob("*.json"), reverse=True):
+            try:
+                with open(json_file, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                entries.append(meta)
+            except Exception:
+                continue
+            if len(entries) >= limit:
+                break
+        if len(entries) >= limit:
+            break
+    return {"history": entries[:limit]}
+
+
+@app.get("/api/history/{item_id}/image")
+def history_image(item_id: str, date: str = ""):
+    """Serve a historical image by id and optional date folder."""
+    if date:
+        img_path = Path(HISTORY_DIR) / date / f"{item_id}.png"
+    else:
+        # Search recent folders for the id
+        img_path = None
+        for day_dir in sorted(Path(HISTORY_DIR).iterdir(), reverse=True):
+            if not day_dir.is_dir():
+                continue
+            candidate = day_dir / f"{item_id}.png"
+            if candidate.exists():
+                img_path = candidate
+                break
+    if not img_path or not img_path.exists():
+        raise HTTPException(404, "Image not found")
+    return FileResponse(str(img_path), media_type="image/png")
+
 
 # ── SPA Catch-All ───────────────────────────────────────────────────
 @app.get("/{path:path}")
