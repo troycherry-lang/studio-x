@@ -30,13 +30,13 @@ DEFAULT_MODEL = "juggernautXL_v8Rundiffusion.safetensors"
 # Add entries here as you download new checkpoints into ComfyUI\models\checkpoints\
 MODEL_DESCRIPTIONS = {
     "juggernautXL_v8Rundiffusion.safetensors": "General photorealism — good default, mild anatomy",
-    "juggernautXL_v9Rundiffusion.safetensors": "General photorealism — newer Juggernaut",
-    "realvisxlV40.safetensors": "Realistic portraits, less censored, good skin detail",
-    "realvisxlV50.safetensors": "Realistic portraits, less censored, strong prompt adherence",
-    "reliberate_v30.safetensors": "NSFW-tuned, explicit anatomy, very prompt-obedient",
+    "Juggernaut-XL_v9_RunDiffusionPhoto_v2.safetensors": "General photorealism — newer Juggernaut, better skin",
+    "realisticStockPhoto_v20.safetensors": "Stock-photo realism, natural lighting, mild anatomy",
+    "RealVisXL_V5.0_fp16.safetensors": "Realistic portraits, less censored, strong prompt adherence",
+    "reliberate_v30.safetensors": "NSFW-tuned photorealism, explicit anatomy, very prompt-obedient",
     "epicrealismXL_vxa.safetensors": "Cinematic realism, natural skin, decent anatomy",
     "ponyDiffusionV6XL.safetensors": "Anime/2.5D, extremely explicit-capable, tag-based",
-    "illustriousXL_v10.safetensors": "Anime/2.5D, uncensored, highly detailed",
+    "Illustrious-XL-v0.1.safetensors": "Anime/2.5D, uncensored, highly detailed, strong anatomy",
     "anythingV5.safetensors": "Anime/hentai-biased, explicit anatomy by default",
     "aom3A1B.safetensors": "Anime, strong NSFW capability",
     "counterfeitV30_v30.safetensors": "Stylized anime, detailed anatomy",
